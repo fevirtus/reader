@@ -8,11 +8,15 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (process.client) {
     const { isAuthenticated, checkAuthStatus } = useAuth()
     
-    // Kiểm tra trạng thái auth hiện tại
-    await checkAuthStatus()
-    
-    if (!isAuthenticated.value) {
-      return navigateTo('/login')
+    try {
+      // Kiểm tra trạng thái auth hiện tại
+      await checkAuthStatus()
+      
+      // Không chuyển hướng nếu không authenticated, để user có thể xem trang chủ
+      // Auth check sẽ tự động logout nếu token không hợp lệ
+    } catch (error) {
+      console.error('Auth check failed:', error)
+      // Không chuyển hướng về login, để user ở lại trang hiện tại
     }
   }
 }) 

@@ -10,7 +10,16 @@ export const useAuth = () => {
     if (token) {
       isAuthenticated.value = true
       // Tự động lấy thông tin user khi có token
-      await fetchUserInfo()
+      try {
+        await fetchUserInfo()
+      } catch (error) {
+        console.error('Failed to check auth status:', error)
+        // Nếu fetchUserInfo thất bại, nó sẽ tự động xóa token và chuyển về login
+        throw error
+      }
+    } else {
+      isAuthenticated.value = false
+      user.value = null
     }
   }
 
@@ -138,47 +147,59 @@ export const useAuth = () => {
     localStorage.removeItem('session_token')
     isAuthenticated.value = false
     user.value = null
-    navigateTo('/login')
+    
+    // Chuyển về trang chủ với param logout=true
+    const currentUrl = new URL(window.location.href)
+    currentUrl.searchParams.set('logout', 'true')
+    navigateTo(currentUrl.pathname + currentUrl.search)
   }
 
   // Lấy thông tin user từ API
   const fetchUserInfo = async () => {
     try {
       const token = localStorage.getItem('session_token')
+      console.log('fetchUserInfo - Token from localStorage:', token ? 'Token exists' : 'No token')
+      
       if (!token) {
         console.log('No session token found')
         return
       }
       
-      console.log('Fetching user info with token:', token)
+      console.log('Fetching user info with token:', token.substring(0, 10) + '...')
       
-      const response = await fetch('http://localhost:8000/api/v1/user/profile', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      const { apiGet } = useApi()
+      const userData = await apiGet('http://localhost:8000/api/v1/user/profile')
       
-      if (response.ok) {
-        const userData = await response.json()
-        console.log('User info fetched successfully:', userData)
-        user.value = userData
-        isAuthenticated.value = true
-      } else if (response.status === 401) {
-        // Token không hợp lệ, xóa token và reset state
-        console.log('Token invalid, clearing auth state')
-        localStorage.removeItem('session_token')
-        isAuthenticated.value = false
-        user.value = null
-      } else {
-        console.error('Failed to fetch user info:', response.status)
-      }
+      console.log('User info fetched successfully:', userData)
+      user.value = userData
+      isAuthenticated.value = true
     } catch (err) {
       console.error('Lỗi lấy thông tin user:', err)
-      // Nếu có lỗi network, có thể token đã hết hạn
-      localStorage.removeItem('session_token')
-      isAuthenticated.value = false
-      user.value = null
+      // useApi sẽ tự động xử lý unauthorized errors
+      throw err
+    }
+  }
+
+  // Helper function để xử lý unauthorized errors
+  const handleUnauthorized = () => {
+    console.log('Handling unauthorized error - logging out and redirecting to home')
+    localStorage.removeItem('session_token')
+    isAuthenticated.value = false
+    user.value = null
+    
+    // Chuyển về trang chủ với param logout=true
+    const currentUrl = new URL(window.location.href)
+    currentUrl.searchParams.set('logout', 'true')
+    navigateTo(currentUrl.pathname + currentUrl.search)
+  }
+
+  // Helper function để tạo headers với auth token
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('session_token')
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
     }
   }
 
@@ -202,6 +223,8 @@ export const useAuth = () => {
     handleCallback,
     logout,
     fetchUserInfo,
-    checkAuthStatus
+    checkAuthStatus,
+    handleUnauthorized,
+    getAuthHeaders
   }
 } 

@@ -49,6 +49,24 @@ onMounted(async () => {
       // Lưu session token
       localStorage.setItem('session_token', sessionToken)
       console.log('Session token saved to localStorage')
+      console.log('Token value:', sessionToken)
+      console.log('localStorage keys:', Object.keys(localStorage))
+      
+      // Đợi một chút để đảm bảo token được lưu
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Kiểm tra token đã được lưu chưa
+      const savedToken = localStorage.getItem('session_token')
+      console.log('Saved token check:', savedToken ? 'Token found' : 'Token not found')
+      console.log('Saved token value:', savedToken)
+      
+      if (!savedToken) {
+        throw new Error('Token was not saved properly')
+      }
+      
+      if (savedToken !== sessionToken) {
+        console.warn('Token mismatch - saved vs original')
+      }
       
       // Cập nhật trạng thái đăng nhập
       const { isAuthenticated, fetchUserInfo } = useAuth()

@@ -146,6 +146,37 @@
 
     <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <!-- Logout Message -->
+      <div v-if="showLogoutMessage" class="mb-6">
+        <div class="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+              </svg>
+            </div>
+            <div class="ml-3">
+              <h3 class="text-sm font-medium text-yellow-800">
+                Phiên đăng nhập đã hết hạn
+              </h3>
+              <div class="mt-2 text-sm text-yellow-700">
+                <p>Vui lòng đăng nhập lại để tiếp tục sử dụng các tính năng cá nhân.</p>
+              </div>
+              <div class="mt-4">
+                <div class="-mx-2 -my-1.5 flex">
+                  <NuxtLink
+                    to="/login"
+                    class="bg-yellow-50 px-2 py-1.5 rounded-md text-sm font-medium text-yellow-800 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-yellow-50 focus:ring-yellow-600"
+                  >
+                    Đăng nhập lại
+                  </NuxtLink>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="flex gap-6">
         <!-- Sidebar -->
         <div class="w-64 flex-shrink-0">
@@ -284,6 +315,7 @@ const { user, isAuthenticated, logout } = useAuth()
 
 // User menu state
 const showUserMenu = ref(false)
+const showLogoutMessage = ref(false)
 
 // Toggle user menu
 const toggleUserMenu = () => {
@@ -458,6 +490,26 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+})
+
+// Check if user was logged out
+onMounted(() => {
+  // Kiểm tra nếu user bị logout (có token trong URL params)
+  const urlParams = new URLSearchParams(window.location.search)
+  const logoutParam = urlParams.get('logout')
+  
+  if (logoutParam === 'true') {
+    showLogoutMessage.value = true
+    // Xóa param khỏi URL
+    const newUrl = new URL(window.location.href)
+    newUrl.searchParams.delete('logout')
+    window.history.replaceState({}, '', newUrl.toString())
+    
+    // Tự động ẩn thông báo sau 5 giây
+    setTimeout(() => {
+      showLogoutMessage.value = false
+    }, 5000)
+  }
 })
 </script>
 
