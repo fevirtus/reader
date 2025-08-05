@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&family=Open+Sans:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -6,6 +8,10 @@
 @layer base {
   html {
     font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    transition: background-color 0.3s ease;
   }
 }
 
@@ -16,5 +22,34 @@
   
   .btn-secondary {
     @apply px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors;
+  }
+  
+  /* Reading content styles */
+  .reading-content {
+    font-family: var(--font-family, 'Roboto', sans-serif);
+    font-size: var(--font-size, 22px);
+    line-height: var(--line-height, 1.2);
+    color: var(--text-color, #e5e7eb);
+  }
+  
+  /* Background themes */
+  .bg-theme-dark {
+    background-color: #111827;
+    color: #e5e7eb;
+  }
+  
+  .bg-theme-light {
+    background-color: #ffffff;
+    color: #1f2937;
+  }
+  
+  .bg-theme-cream {
+    background-color: #fefce8;
+    color: #1f2937;
+  }
+  
+  .bg-theme-sepia {
+    background-color: #fef3c7;
+    color: #1f2937;
   }
 } 

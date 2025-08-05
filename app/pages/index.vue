@@ -18,6 +18,7 @@
             <div class="relative">
               <input
                 v-model="searchQuery"
+                @keyup.enter="handleSearch"
                 type="text"
                 placeholder="Tìm kiếm truyện..."
                 class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -186,7 +187,7 @@
               <button
                 v-for="category in categories"
                 :key="category.id"
-                @click="selectedCategory = category.id"
+                @click="handleCategoryFilter(category.id)"
                 :class="[
                   'w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-colors',
                   selectedCategory === category.id
@@ -201,17 +202,15 @@
             <div class="border-t border-gray-200 mt-6 pt-4">
               <h4 class="text-sm font-medium text-gray-900 mb-3">Trạng thái</h4>
               <div class="space-y-2">
-                <label class="flex items-center">
-                  <input type="checkbox" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                  <span class="ml-2 text-sm text-gray-700">Đang tiến hành</span>
-                </label>
-                <label class="flex items-center">
-                  <input type="checkbox" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                  <span class="ml-2 text-sm text-gray-700">Hoàn thành</span>
-                </label>
-                <label class="flex items-center">
-                  <input type="checkbox" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                  <span class="ml-2 text-sm text-gray-700">Tạm ngưng</span>
+                <label v-for="status in statusOptions" :key="status.id" class="flex items-center">
+                  <input
+                    type="radio"
+                    :value="status.id"
+                    v-model="selectedStatus"
+                    @change="handleStatusFilter(selectedStatus)"
+                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span class="ml-2 text-sm text-gray-700">{{ status.name }}</span>
                 </label>
               </div>
             </div>
@@ -224,80 +223,138 @@
           <div class="bg-white rounded-lg shadow p-4 mb-6">
             <div class="flex items-center justify-between">
               <div class="flex items-center space-x-4">
-                <select class="border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                  <option>Sắp xếp theo</option>
-                  <option>Mới nhất</option>
-                  <option>Lượt xem</option>
-                  <option>Đánh giá</option>
+                <select 
+                  v-model="selectedStatus"
+                  @change="handleStatusFilter(selectedStatus)"
+                  class="border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option v-for="status in statusOptions" :key="status.id" :value="status.id">
+                    {{ status.name }}
+                  </option>
                 </select>
-                <button class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                  Bộ lọc
+                <button 
+                  @click="handleSearch"
+                  :disabled="loading"
+                  class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {{ loading ? 'Đang tải...' : 'Tìm kiếm' }}
                 </button>
               </div>
               <div class="text-sm text-gray-500">
-                Hiển thị {{ filteredStories.length }} truyện
+                Hiển thị {{ novels?.length || 0 }} truyện
+                <span v-if="loading" class="ml-2">(Đang tải...)</span>
               </div>
             </div>
           </div>
 
+          <!-- Error Message -->
+          <div v-if="error" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div class="flex">
+              <svg class="w-5 h-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+              </svg>
+              <div class="ml-3">
+                <p class="text-sm text-red-800">{{ error }}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Loading State -->
+          <div v-if="loading" class="flex justify-center items-center py-12">
+            <div class="flex items-center space-x-2">
+              <div class="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              <span class="text-gray-600">Đang tải danh sách truyện...</span>
+            </div>
+          </div>
+
           <!-- Stories Grid -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-            <div
-              v-for="story in filteredStories"
-              :key="story.id"
+          <div v-if="showGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            <NuxtLink
+              v-for="novel in novels"
+              :key="novel.id"
+              :to="`/novel/${novel.id}/detail`"
               class="bg-white rounded-lg shadow overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
             >
               <div class="aspect-[3/4] bg-gray-200 relative overflow-hidden">
                 <img
-                  :src="story.cover"
-                  :alt="story.title"
+                  :src="novel.cover_image || '/images/no-image.svg'"
+                  :alt="novel.title"
                   class="w-full h-full object-cover"
+                  @error="$event.target.src = '/images/no-image.svg'"
                 />
                 <div class="absolute top-2 left-2">
-                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                    {{ story.status }}
+                  <span 
+                    :class="[
+                      'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium',
+                      novel.status === 'ongoing' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
+                    ]"
+                  >
+                    {{ novel.status === 'ongoing' ? 'Đang tiến hành' : 'Hoàn thành' }}
                   </span>
                 </div>
                 <div class="absolute bottom-2 right-2">
                   <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    {{ story.chapters }} chương
+                    {{ novel.total_chapters }} chương
                   </span>
                 </div>
               </div>
               <div class="p-4">
                 <h3 class="font-medium text-gray-900 text-sm line-clamp-2 mb-1">
-                  {{ story.title }}
+                  {{ novel.title }}
                 </h3>
-                <p class="text-xs text-gray-500 mb-2">{{ story.author }}</p>
+                <p class="text-xs text-gray-500 mb-2">{{ novel.author }}</p>
                 <div class="flex items-center justify-between text-xs text-gray-500">
-                  <span>{{ story.views }} lượt xem</span>
+                  <span>{{ novel.views.toLocaleString() }} lượt xem</span>
                   <div class="flex items-center">
                     <svg class="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                       <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
                     </svg>
-                    {{ story.rating }}
+                    {{ novel.rating }}
                   </div>
                 </div>
               </div>
-            </div>
+            </NuxtLink>
+          </div>
+
+          <!-- Empty State -->
+          <div v-if="showEmptyState" class="text-center py-12">
+            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+            </svg>
+            <h3 class="mt-2 text-sm font-medium text-gray-900">Không tìm thấy truyện</h3>
+            <p class="mt-1 text-sm text-gray-500">Thử thay đổi từ khóa tìm kiếm hoặc bộ lọc.</p>
           </div>
 
           <!-- Pagination -->
-          <div class="mt-8 flex justify-center">
+          <div v-if="showGrid && totalPages > 1" class="mt-8 flex justify-center">
             <nav class="flex items-center space-x-2">
-              <button class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+              <button 
+                @click="goToPage(currentPage - 1)"
+                :disabled="currentPage <= 1"
+                class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 Trước
               </button>
-              <button class="px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-md">
-                1
+              
+              <button 
+                v-for="page in visiblePages"
+                :key="page"
+                @click="goToPage(page)"
+                :class="[
+                  'px-3 py-2 text-sm font-medium rounded-md',
+                  page === currentPage
+                    ? 'text-white bg-blue-600 border border-blue-600'
+                    : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                ]"
+              >
+                {{ page }}
               </button>
-              <button class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                2
-              </button>
-              <button class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                3
-              </button>
-              <button class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+              
+              <button 
+                @click="goToPage(currentPage + 1)"
+                :disabled="currentPage >= totalPages"
+                class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 Sau
               </button>
             </nav>
@@ -309,13 +366,34 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 
 const { user, isAuthenticated, logout } = useAuth()
+
+// Sử dụng useNovels với fallback
+const novelsComposable = useNovels()
+const novels = novelsComposable?.novels || ref([])
+const loading = novelsComposable?.loading || ref(false)
+const error = novelsComposable?.error || ref('')
+const fetchNovels = novelsComposable?.fetchNovels || (() => Promise.resolve([]))
+const searchNovels = novelsComposable?.searchNovels || (() => Promise.resolve([]))
+const filterByStatus = novelsComposable?.filterByStatus || (() => Promise.resolve([]))
 
 // User menu state
 const showUserMenu = ref(false)
 const showLogoutMessage = ref(false)
+
+// Search and filter state
+const searchQuery = ref('')
+const selectedCategory = ref('all')
+const selectedStatus = ref('all')
+
+// Pagination state
+const currentPage = ref(1)
+const itemsPerPage = ref(10)
+const totalItems = ref(0)
+const totalPages = ref(1)
+const visiblePages = ref([])
 
 // Toggle user menu
 const toggleUserMenu = () => {
@@ -335,10 +413,7 @@ const handleClickOutside = (event) => {
   }
 }
 
-// Mock data
-const searchQuery = ref('')
-const selectedCategory = ref('all')
-
+// Categories mapping
 const categories = ref([
   { id: 'all', name: 'Tất cả' },
   { id: 'action', name: 'Hành động' },
@@ -350,138 +425,93 @@ const categories = ref([
   { id: 'sci-fi', name: 'Khoa học viễn tưởng' }
 ])
 
-const stories = ref([
-  {
-    id: 1,
-    title: 'Tu Tiên Chi Độ',
-    author: 'Tác giả A',
-    cover: 'https://via.placeholder.com/300x400/4F46E5/FFFFFF?text=Tu+Tiên',
-    status: 'Đang tiến hành',
-    chapters: 150,
-    views: '1.2M',
-    rating: 4.5,
-    category: 'fantasy'
-  },
-  {
-    id: 2,
-    title: 'Võ Thần Tái Lâm',
-    author: 'Tác giả B',
-    cover: 'https://via.placeholder.com/300x400/DC2626/FFFFFF?text=Võ+Thần',
-    status: 'Hoàn thành',
-    chapters: 200,
-    views: '2.1M',
-    rating: 4.8,
-    category: 'action'
-  },
-  {
-    id: 3,
-    title: 'Tình Yêu Hoàn Hảo',
-    author: 'Tác giả C',
-    cover: 'https://via.placeholder.com/300x400/059669/FFFFFF?text=Tình+Yêu',
-    status: 'Đang tiến hành',
-    chapters: 80,
-    views: '850K',
-    rating: 4.2,
-    category: 'romance'
-  },
-  {
-    id: 4,
-    title: 'Cười Vỡ Bụng',
-    author: 'Tác giả D',
-    cover: 'https://via.placeholder.com/300x400/F59E0B/FFFFFF?text=Cười',
-    status: 'Hoàn thành',
-    chapters: 120,
-    views: '950K',
-    rating: 4.6,
-    category: 'comedy'
-  },
-  {
-    id: 5,
-    title: 'Bí Mật Thời Gian',
-    author: 'Tác giả E',
-    cover: 'https://via.placeholder.com/300x400/7C3AED/FFFFFF?text=Bí+Mật',
-    status: 'Đang tiến hành',
-    chapters: 95,
-    views: '1.5M',
-    rating: 4.7,
-    category: 'mystery'
-  },
-  {
-    id: 6,
-    title: 'Vũ Trụ Song Song',
-    author: 'Tác giả F',
-    cover: 'https://via.placeholder.com/300x400/0891B2/FFFFFF?text=Vũ+Trụ',
-    status: 'Tạm ngưng',
-    chapters: 60,
-    views: '720K',
-    rating: 4.3,
-    category: 'sci-fi'
-  },
-  {
-    id: 7,
-    title: 'Tình Yêu Và Định Mệnh',
-    author: 'Tác giả G',
-    cover: 'https://via.placeholder.com/300x400/DB2777/FFFFFF?text=Định+Mệnh',
-    status: 'Đang tiến hành',
-    chapters: 110,
-    views: '1.8M',
-    rating: 4.9,
-    category: 'romance'
-  },
-  {
-    id: 8,
-    title: 'Chiến Binh Bóng Đêm',
-    author: 'Tác giả H',
-    cover: 'https://via.placeholder.com/300x400/1F2937/FFFFFF?text=Chiến+Binh',
-    status: 'Hoàn thành',
-    chapters: 180,
-    views: '2.3M',
-    rating: 4.4,
-    category: 'action'
-  },
-  {
-    id: 9,
-    title: 'Thế Giới Ảo',
-    author: 'Tác giả I',
-    cover: 'https://via.placeholder.com/300x400/10B981/FFFFFF?text=Thế+Giới',
-    status: 'Đang tiến hành',
-    chapters: 130,
-    views: '1.1M',
-    rating: 4.1,
-    category: 'fantasy'
-  },
-  {
-    id: 10,
-    title: 'Nụ Cười Tươi',
-    author: 'Tác giả J',
-    cover: 'https://via.placeholder.com/300x400/F97316/FFFFFF?text=Nụ+Cười',
-    status: 'Hoàn thành',
-    chapters: 90,
-    views: '680K',
-    rating: 4.0,
-    category: 'comedy'
-  }
+// Status mapping
+const statusOptions = ref([
+  { id: 'all', name: 'Tất cả' },
+  { id: 'ongoing', name: 'Đang tiến hành' },
+  { id: 'completed', name: 'Hoàn thành' }
 ])
 
-const filteredStories = computed(() => {
-  let filtered = stories.value
-
-  // Filter by category
-  if (selectedCategory.value !== 'all') {
-    filtered = filtered.filter(story => story.category === selectedCategory.value)
+// Load novels on mount
+onMounted(async () => {
+  try {
+    await fetchNovels({ limit: itemsPerPage.value, page: currentPage.value })
+  } catch (err) {
+    // Failed to load novels
   }
-
-  // Filter by search query
-  if (searchQuery.value) {
-    const query = searchQuery.value.toLowerCase()
-    filtered = filtered.filter(story => 
-      story.title.toLowerCase().includes(query) ||
-      story.author.toLowerCase().includes(query)
-    )
-  }
-
-  return filtered
 })
+
+// Search novels
+const handleSearch = async () => {
+  if (searchQuery.value.trim()) {
+    try {
+      await searchNovels(searchQuery.value.trim())
+      } catch (err) {
+    // Search failed
+  }
+  } else {
+    // Reset to all novels if search is empty
+    try {
+      await fetchNovels({ limit: itemsPerPage.value, page: currentPage.value })
+    } catch (err) {
+      console.error('Failed to load novels:', err)
+    }
+  }
+}
+
+// Filter by status
+const handleStatusFilter = async (status) => {
+  selectedStatus.value = status
+  if (status === 'all') {
+    try {
+      await fetchNovels({ limit: itemsPerPage.value, page: currentPage.value })
+    } catch (err) {
+      // Failed to load novels
+    }
+  } else {
+    try {
+      await filterByStatus(status)
+    } catch (err) {
+      // Status filter failed
+    }
+  }
+}
+
+// Filter by category (placeholder - backend chưa hỗ trợ)
+const handleCategoryFilter = (category) => {
+  selectedCategory.value = category
+  // TODO: Implement category filter when backend supports it
+}
+
+// Computed properties
+const hasNovels = computed(() => novels.value && novels.value.length > 0)
+const showEmptyState = computed(() => !loading.value && !hasNovels.value)
+const showGrid = computed(() => !loading.value && hasNovels.value)
+
+// Calculate total pages
+const calculateTotalPages = () => {
+  totalPages.value = Math.ceil(totalItems.value / itemsPerPage.value)
+  if (totalPages.value === 0) totalPages.value = 1
+  updateVisiblePages()
+}
+
+// Update visible pages for pagination
+const updateVisiblePages = () => {
+  const start = Math.max(1, currentPage.value - 2)
+  const end = Math.min(totalPages.value, start + 4)
+  visiblePages.value = []
+  for (let i = start; i <= end; i++) {
+    visiblePages.value.push(i)
+  }
+}
+
+// Go to a specific page
+const goToPage = async (page) => {
+  if (page < 1) page = 1
+  if (page > totalPages.value) page = totalPages.value
+  currentPage.value = page
+  await fetchNovels({ limit: itemsPerPage.value, page: currentPage.value })
+}
 
 // Add event listeners
 onMounted(() => {

@@ -1,6 +1,5 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
-  compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
   
   // Thêm Tailwind CSS
@@ -11,10 +10,18 @@ export default defineNuxtConfig({
     '@nuxtjs/tailwindcss'
   ],
   
-  // Cấu hình runtime config
   runtimeConfig: {
     public: {
       apiBase: process.env.API_BASE_URL || 'http://localhost:8000'
+    }
+  },
+  
+  nitro: {
+    devProxy: {
+      '/api': {
+        target: process.env.API_BASE_URL || 'http://localhost:8000',
+        changeOrigin: true
+      }
     }
   },
   
