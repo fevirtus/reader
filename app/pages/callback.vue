@@ -25,16 +25,13 @@ onMounted(async () => {
   // Trường hợp 1: Backend đã xử lý OAuth và trả về session_token trực tiếp
   if (sessionToken) {
     message.value = 'Đang xử lý đăng nhập...'
-    console.log('Session token received:', sessionToken)
     
     try {
       // Set token vào store
       userStore.setToken(sessionToken)
-      console.log('Token set in store')
       
       // Fetch thông tin user
       const userInfo = await userStore.fetchUserInfo()
-      console.log('User info fetched:', userInfo)
       
       message.value = 'Đăng nhập thành công! Đang chuyển hướng...'
       

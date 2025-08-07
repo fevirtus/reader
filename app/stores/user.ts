@@ -193,9 +193,6 @@ export const useUserStore = defineStore('user', {
         const config = useRuntimeConfig()
         const apiBase = config.public.apiBase
         
-        console.log('🔗 OAuth login - API base:', apiBase)
-        console.log('🔗 OAuth login - Provider:', provider)
-        
         const response = await fetch(`${apiBase}/api/v1/oauth/${provider}/auth`, {
           method: 'GET',
           headers: {
@@ -204,23 +201,16 @@ export const useUserStore = defineStore('user', {
           }
         })
         
-        console.log('🔗 OAuth login - Response status:', response.status)
-        
         if (!response.ok) {
-          const errorText = await response.text()
-          console.error('🔗 OAuth login - Error response:', errorText)
           throw new Error(`HTTP ${response.status}: ${response.statusText}`)
         }
         
         const data = await response.json()
-        console.log('🔗 OAuth login - Response data:', data)
         
         // Redirect to OAuth URL
         if (data.auth_url) {
-          console.log('🔗 OAuth login - Redirecting to:', data.auth_url)
           window.location.href = data.auth_url
         } else {
-          console.error('🔗 OAuth login - No auth_url in response')
           throw new Error('No auth URL received from server')
         }
         
