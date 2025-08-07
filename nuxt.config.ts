@@ -7,7 +7,8 @@ export default defineNuxtConfig({
   
   // Cấu hình modules
   modules: [
-    '@nuxtjs/tailwindcss'
+    '@nuxtjs/tailwindcss',
+    '@pinia/nuxt'
   ],
   
   runtimeConfig: {

@@ -1,10 +1,4 @@
 export default defineNuxtRouteMiddleware(async (to) => {
-  // Chỉ áp dụng cho các trang cần auth (không phải login, callback)
-  if (to.path === '/login' || to.path === '/callback' || to.path === '/auth/callback') {
-    return
-  }
-  
-  // Kiểm tra authentication state
   if (process.client) {
     const userStore = useUserStore()
     
@@ -13,12 +7,16 @@ export default defineNuxtRouteMiddleware(async (to) => {
       userStore.init()
     }
     
-    // Kiểm tra auth status
+    // Kiểm tra auth status trước
     const isAuthenticated = await userStore.checkAuthStatus()
     
     if (!isAuthenticated) {
-      // Chuyển về login nếu không authenticated
       return navigateTo('/login')
+    }
+    
+    // Kiểm tra quyền admin
+    if (!userStore.isAdmin) {
+      return navigateTo('/')
     }
   }
 }) 

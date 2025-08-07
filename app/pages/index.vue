@@ -104,6 +104,18 @@
                       </svg>
                       Theo dõi truyện
                     </a>
+                    
+                    <!-- Admin Panel Link -->
+                    <NuxtLink
+                      v-if="isAdmin"
+                      to="/admin"
+                      class="flex items-center px-4 py-2 text-sm text-purple-700 hover:bg-purple-50 hover:text-purple-900"
+                    >
+                      <svg class="w-4 h-4 mr-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                      </svg>
+                      Admin Panel
+                    </NuxtLink>
                   </div>
 
                   <!-- Settings & Logout -->
@@ -368,7 +380,10 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 
-const { user, isAuthenticated, logout } = useAuth()
+const { user, isAuthenticated, logout, isAdmin } = useAuth()
+const { apiGet } = useApi()
+const config = useRuntimeConfig()
+const apiBase = config.public.apiBase
 
 // Sử dụng useNovels với fallback
 const novelsComposable = useNovels()
@@ -431,6 +446,12 @@ const statusOptions = ref([
   { id: 'ongoing', name: 'Đang tiến hành' },
   { id: 'completed', name: 'Hoàn thành' }
 ])
+
+// Check admin status - now handled by Pinia store
+const checkAdminStatus = async () => {
+  // Admin status is now managed by Pinia store
+  // No need to check separately as it's computed from user role
+}
 
 // Load novels on mount
 onMounted(async () => {

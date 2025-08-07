@@ -1,28 +1,15 @@
+import { ref, computed, readonly, onMounted, nextTick } from 'vue'
+
 export const useAuth = () => {
+  const userStore = useUserStore()
   const config = useRuntimeConfig()
   const apiBase = config.public.apiBase
 
-  const isLoading = ref(false)
   const error = ref('')
-  const user = ref(null)
-  const isAuthenticated = ref(false)
 
   // Kiểm tra trạng thái đăng nhập khi khởi tạo
   const checkAuthStatus = async () => {
-    const token = localStorage.getItem('session_token')
-    if (token) {
-      isAuthenticated.value = true
-      // Tự động lấy thông tin user khi có token
-      try {
-        await fetchUserInfo()
-      } catch (error) {
-        // Nếu fetchUserInfo thất bại, nó sẽ tự động xóa token và chuyển về login
-        throw error
-      }
-    } else {
-      isAuthenticated.value = false
-      user.value = null
-    }
+    return await userStore.checkAuthStatus()
   }
 
   // Kiểm tra xem có phải là OAuth callback không
@@ -49,88 +36,45 @@ export const useAuth = () => {
   // Đăng nhập với Google
   const loginWithGoogle = async () => {
     try {
-      isLoading.value = true
       error.value = ''
       
-      // Tạo redirect URL cho callback
-      const redirectUrl = `${window.location.origin}/callback`
+      const result = await userStore.oauthLogin('google')
       
-      const response = await fetch(`${apiBase}/api/v1/oauth/google/auth?redirect_uri=${encodeURIComponent(redirectUrl)}`)
-      
-      if (!response.ok) {
-        throw new Error('Không thể kết nối đến server')
-      }
-      
-      const data = await response.json()
-      
-      if (data.auth_url) {
-        // Chuyển hướng trực tiếp thay vì mở popup
-        window.location.href = data.auth_url
-      } else {
-        throw new Error('Không nhận được URL xác thực từ server')
+      if (!result.success) {
+        error.value = result.error || 'OAuth login failed'
       }
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Có lỗi xảy ra khi đăng nhập'
-    } finally {
-      isLoading.value = false
     }
   }
 
   // Xử lý callback từ OAuth
   const handleCallback = async (code: string) => {
     try {
-      isLoading.value = true
       error.value = ''
       
-      const response = await fetch(`${apiBase}/api/v1/oauth/google/callback?code=${code}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      })
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Lỗi xác thực từ server: ${response.status} - ${errorText}`)
-      }
+      const state = new URLSearchParams(window.location.search).get('state') || ''
+      const result = await userStore.handleOAuthCallback(code, state)
       
-      const data = await response.json()
-      
-      if (data.session_token) {
-        // Lưu session token vào localStorage
-        localStorage.setItem('session_token', data.session_token)
-        
-        // Cập nhật trạng thái đăng nhập
-        isAuthenticated.value = true
-        
-        // Cập nhật thông tin user từ response
-        if (data.user) {
-          user.value = data.user
-        } else {
-          // Nếu không có user info trong response, fetch từ API
-          await fetchUserInfo()
-        }
-        
+      if (result.success) {
         // Chuyển hướng về trang chủ
         await navigateTo('/')
       } else {
-        throw new Error('Không nhận được token từ server')
+        error.value = result.error || 'OAuth callback failed'
+        // Chuyển về trang login với lỗi
+        await navigateTo('/login')
       }
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Đăng nhập thất bại'
       
       // Chuyển về trang login với lỗi
       await navigateTo('/login')
-    } finally {
-      isLoading.value = false
     }
   }
 
   // Đăng xuất
   const logout = () => {
-    localStorage.removeItem('session_token')
-    isAuthenticated.value = false
-    user.value = null
+    userStore.logout()
     
     // Chuyển về trang chủ với param logout=true
     const currentUrl = new URL(window.location.href)
@@ -138,31 +82,14 @@ export const useAuth = () => {
     navigateTo(currentUrl.pathname + currentUrl.search)
   }
 
-  // Lấy thông tin user từ API
+  // Lấy thông tin user từ API (force fetch)
   const fetchUserInfo = async () => {
-    try {
-      const token = localStorage.getItem('session_token')
-      
-      if (!token) {
-        return
-      }
-      
-      const { apiGet } = useApi()
-      const userData = await apiGet(`${apiBase}/api/v1/user/profile`)
-      
-      user.value = userData
-      isAuthenticated.value = true
-    } catch (err) {
-      // useApi sẽ tự động xử lý unauthorized errors
-      throw err
-    }
+    return await userStore.fetchUserInfo()
   }
 
   // Helper function để xử lý unauthorized errors
   const handleUnauthorized = () => {
-    localStorage.removeItem('session_token')
-    isAuthenticated.value = false
-    user.value = null
+    userStore.logout()
     
     // Chuyển về trang chủ với param logout=true
     const currentUrl = new URL(window.location.href)
@@ -172,28 +99,32 @@ export const useAuth = () => {
 
   // Helper function để tạo headers với auth token
   const getAuthHeaders = () => {
-    const token = localStorage.getItem('session_token')
     return {
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${userStore.token}`,
       'Content-Type': 'application/json',
       'Accept': 'application/json'
     }
   }
 
-  // Khởi tạo khi composable được sử dụng
-  onMounted(async () => {
-    await checkAuthStatus()
-    
-    // Kiểm tra OAuth callback
-    checkOAuthCallback()
-  })
+  // Khởi tạo khi composable được sử dụng (chỉ trong component context)
+  if (process.client) {
+    onMounted(async () => {
+      // Delay để tránh hydration mismatch
+      await nextTick()
+      await checkAuthStatus()
+      
+      // Kiểm tra OAuth callback
+      checkOAuthCallback()
+    })
+  }
 
   return {
-    // State
-    isLoading: readonly(isLoading),
+    // State (từ store)
+    isLoading: computed(() => userStore.isLoading),
     error: readonly(error),
-    user: readonly(user),
-    isAuthenticated: readonly(isAuthenticated),
+    user: computed(() => userStore.user),
+    isAuthenticated: computed(() => userStore.isAuthenticated),
+    isAdmin: computed(() => userStore.isAdmin),
     
     // Methods
     loginWithGoogle,
