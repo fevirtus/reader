@@ -63,7 +63,7 @@ export default function BookshelfPage() {
                   <Link href={`/truyen/${novel.slug}`} className="truncate text-sm font-semibold text-foreground hover:text-primary transition-colors">
                     {novel.title}
                   </Link>
-                  <p className="text-xs text-muted-foreground">{novel.author}</p>
+                  <p className="text-xs text-muted-foreground">{novel.authorName}</p>
                   {bookmark.lastChapterNumber && (
                     <p className="text-xs text-muted-foreground">
                       Đang đọc: Chương {bookmark.lastChapterNumber} / {novel.totalChapters}

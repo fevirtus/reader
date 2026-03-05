@@ -13,7 +13,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
-import { BookOpen, Loader2, Plus } from "lucide-react"
+import { BookOpen, Loader2, Plus, Upload } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
 
@@ -31,6 +31,7 @@ export function NovelClient() {
     const [loading, setLoading] = useState(true)
     const [openAdd, setOpenAdd] = useState(false)
     const [submitting, setSubmitting] = useState(false)
+    const [uploadingEpub, setUploadingEpub] = useState(false)
 
     // Form states
     const [title, setTitle] = useState("")
@@ -82,6 +83,41 @@ export function NovelClient() {
         }
     }
 
+    const handleEpubUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+
+        if (!file.name.endsWith('.epub')) {
+            toast.error("Vui lòng chọn file định dạng .epub")
+            e.target.value = "" // Reset input
+            return
+        }
+
+        setUploadingEpub(true)
+        const formData = new FormData()
+        formData.append("file", file)
+
+        try {
+            const res = await fetch("/api/mod/epub", {
+                method: "POST",
+                body: formData,
+            })
+
+            if (!res.ok) {
+                const data = await res.json()
+                throw new Error(data.error || "Lỗi khi tải lên EPUB")
+            }
+
+            toast.success("Phân tích và xuất bản EPUB thành công!")
+            fetchNovels()
+        } catch (err: any) {
+            toast.error(err.message || "Có lỗi xảy ra khi xử lý file EPUB")
+        } finally {
+            setUploadingEpub(false)
+            e.target.value = "" // Reset input
+        }
+    }
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center bg-card p-4 rounded-xl border shadow-sm">
@@ -89,41 +125,61 @@ export function NovelClient() {
                     <BookOpen className="h-6 w-6 text-primary" /> Quản lý truyện
                 </h1>
 
-                <Dialog open={openAdd} onOpenChange={setOpenAdd}>
-                    <DialogTrigger asChild>
-                        <Button className="gap-2">
-                            <Plus className="h-4 w-4" /> Thêm truyện
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-[425px]">
-                        <DialogHeader>
-                            <DialogTitle>Thêm Truyện Mới</DialogTitle>
-                            <DialogDescription>
-                                Nhập thông tin cơ bản cho đầu truyện mới của bạn.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <form onSubmit={handleAddSubmit} className="space-y-4 pt-4">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Tên truyện</label>
-                                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Phàm Nhân Tu Tiên" autoFocus />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Tác giả gốc</label>
-                                <Input value={authorName} onChange={(e) => setAuthorName(e.target.value)} placeholder="Ví dụ: Vong Ngữ" />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Giới thiệu ngắn (Mô tả)</label>
-                                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Tóm tắt về câu chuyện..." rows={4} />
-                            </div>
-                            <DialogFooter>
-                                <Button type="submit" disabled={submitting}>
-                                    {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Hoàn thành
-                                </Button>
-                            </DialogFooter>
-                        </form>
-                    </DialogContent>
-                </Dialog>
+                <div className="flex gap-3">
+                    <input
+                        type="file"
+                        id="epub-upload"
+                        accept=".epub,application/epub+zip"
+                        className="hidden"
+                        onChange={handleEpubUpload}
+                        disabled={uploadingEpub}
+                    />
+                    <Button
+                        variant="secondary"
+                        className="gap-2"
+                        disabled={uploadingEpub}
+                        onClick={() => document.getElementById('epub-upload')?.click()}
+                    >
+                        {uploadingEpub ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        Tải lên EPUB
+                    </Button>
+
+                    <Dialog open={openAdd} onOpenChange={setOpenAdd}>
+                        <DialogTrigger asChild>
+                            <Button className="gap-2">
+                                <Plus className="h-4 w-4" /> Thêm truyện
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[425px]">
+                            <DialogHeader>
+                                <DialogTitle>Thêm Truyện Mới</DialogTitle>
+                                <DialogDescription>
+                                    Nhập thông tin cơ bản cho đầu truyện mới của bạn.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <form onSubmit={handleAddSubmit} className="space-y-4 pt-4">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Tên truyện</label>
+                                    <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Phàm Nhân Tu Tiên" autoFocus />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Tác giả gốc</label>
+                                    <Input value={authorName} onChange={(e) => setAuthorName(e.target.value)} placeholder="Ví dụ: Vong Ngữ" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Giới thiệu ngắn (Mô tả)</label>
+                                    <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Tóm tắt về câu chuyện..." rows={4} />
+                                </div>
+                                <DialogFooter>
+                                    <Button type="submit" disabled={submitting}>
+                                        {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Hoàn thành
+                                    </Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
             </div>
 
             <div className="rounded-xl border bg-card overflow-hidden shadow-sm">

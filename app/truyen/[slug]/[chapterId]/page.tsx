@@ -1,42 +1,46 @@
-"use client"
-
-import { use, useMemo } from "react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ChevronLeft, ChevronRight, List } from "lucide-react"
-import { getNovelBySlug, getChapter, getChaptersByNovelId, getCommentsByChapterId } from "@/lib/data"
 import { Button } from "@/components/ui/button"
 import { ReadingSettings } from "@/components/reading-settings"
 import { CommentSection } from "@/components/comment-section"
 import { TTSPlayer } from "@/components/tts-player"
 import { ChapterReaderProgress } from "./chapter-reader-progress"
+import { prisma } from "@/lib/prisma"
+import connectToMongoDB from "@/lib/mongoose"
+import { Chapter as ChapterModel } from "@/lib/models/chapter"
 
-export default function ChapterReaderPage({ params }: { params: Promise<{ slug: string; chapterId: string }> }) {
-  const { slug, chapterId } = use(params)
+export default async function ChapterReaderPage({ params }: { params: Promise<{ slug: string; chapterId: string }> }) {
+  const { slug, chapterId } = await params
   const chapterNumber = parseInt(chapterId, 10)
-  const novel = getNovelBySlug(slug)
 
-  if (!novel || isNaN(chapterNumber)) {
+  if (isNaN(chapterNumber)) {
     notFound()
   }
 
-  const chapter = getChapter(novel.id, chapterNumber)
-  const allChapters = getChaptersByNovelId(novel.id)
-  const maxChapter = allChapters.length
+  const novel = await prisma.novel.findUnique({
+    where: { slug }
+  })
+
+  if (!novel) {
+    notFound()
+  }
+
+  await connectToMongoDB()
+  const chapter = await ChapterModel.findOne({ novelId: novel.id, number: chapterNumber }).lean()
 
   if (!chapter) {
     notFound()
   }
 
-  const comments = getCommentsByChapterId(chapter.id)
+  const maxChapter = await ChapterModel.countDocuments({ novelId: novel.id })
+  const comments: any[] = [] // Temporarily empty
+
   const hasPrev = chapterNumber > 1
   const hasNext = chapterNumber < maxChapter
 
   // Extract paragraphs for TTS
-  const paragraphs = useMemo(
-    () => chapter.content.split("\n").map((p) => p.trim()).filter(Boolean),
-    [chapter.content]
-  )
+  const paragraphs = chapter.content.split("\n").map((p: string) => p.trim()).filter(Boolean)
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6">
@@ -85,7 +89,7 @@ export default function ChapterReaderPage({ params }: { params: Promise<{ slug: 
 
       {/* Chapter content */}
       <article className="chapter-content mb-8 rounded-lg border border-border bg-card p-6 font-serif text-foreground/90 md:p-8">
-        {paragraphs.map((text, idx) => (
+        {paragraphs.map((text: string, idx: number) => (
           <p key={idx} data-p-index={idx} className="mb-4 last:mb-0">
             {text}
           </p>
@@ -115,11 +119,11 @@ export default function ChapterReaderPage({ params }: { params: Promise<{ slug: 
       </div>
 
       {/* Save reading progress */}
-      <ChapterReaderProgress novelId={novel.id} chapterId={chapter.id} chapterNumber={chapter.number} />
+      <ChapterReaderProgress novelId={novel.id} chapterId={chapter._id.toString()} chapterNumber={chapter.number} />
 
       {/* Comments */}
       <section className="border-t border-border pt-8">
-        <CommentSection comments={comments} novelId={novel.id} chapterId={chapter.id} />
+        <CommentSection comments={comments} novelId={novel.id} chapterId={chapter._id.toString()} />
       </section>
 
       {/* TTS Player */}
@@ -128,7 +132,7 @@ export default function ChapterReaderPage({ params }: { params: Promise<{ slug: 
         novelSlug={slug}
         currentChapter={chapterNumber}
         maxChapter={maxChapter}
-        chapterTitle={`Chuong ${chapter.number}: ${chapter.title}`}
+        chapterTitle={`Chương ${chapter.number}: ${chapter.title}`}
       />
     </div>
   )

@@ -166,6 +166,7 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
       }
 
       utterance.onerror = (e) => {
+        console.error("TTS Playback Error:", e.error, e)
         if (e.error !== "canceled" && e.error !== "interrupted") {
           setIsPlaying(false)
           releaseWakeLock()

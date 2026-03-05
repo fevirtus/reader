@@ -1,10 +1,21 @@
 import Link from "next/link"
 import { BookOpen, Eye, Star } from "lucide-react"
-import type { Novel } from "@/lib/types"
 import { formatViews } from "@/lib/data"
 
+export interface CardNovel {
+  id: string
+  slug: string
+  title: string
+  authorName: string
+  coverColor: string | null
+  rating: number
+  views: number
+  totalChapters: number
+  status: string
+}
+
 interface NovelCardProps {
-  novel: Novel
+  novel: CardNovel
   variant?: "default" | "compact"
 }
 
@@ -22,7 +33,7 @@ export function NovelCard({ novel, variant = "default" }: NovelCardProps) {
           <h3 className="truncate text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
             {novel.title}
           </h3>
-          <p className="text-xs text-muted-foreground">{novel.author}</p>
+          <p className="text-xs text-muted-foreground">{novel.authorName}</p>
           <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-0.5">
               <Star className="h-3 w-3 fill-primary text-primary" />
@@ -52,7 +63,7 @@ export function NovelCard({ novel, variant = "default" }: NovelCardProps) {
         <h3 className="line-clamp-1 text-sm font-semibold text-foreground group-hover:text-primary transition-colors text-balance">
           {novel.title}
         </h3>
-        <p className="text-xs text-muted-foreground">{novel.author}</p>
+        <p className="text-xs text-muted-foreground">{novel.authorName}</p>
         <div className="mt-auto flex items-center gap-3 pt-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-0.5">
             <Star className="h-3 w-3 fill-primary text-primary" />

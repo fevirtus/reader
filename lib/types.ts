@@ -10,7 +10,7 @@ export interface Novel {
   id: string
   title: string
   slug: string
-  author: string
+  authorName: string
   coverColor: string
   description: string
   genres: string[]
