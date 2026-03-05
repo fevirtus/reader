@@ -1,0 +1,102 @@
+"use client"
+
+import { useState } from "react"
+import { Send } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { useAuth } from "@/lib/auth-context"
+import type { Comment } from "@/lib/types"
+import Link from "next/link"
+
+interface CommentSectionProps {
+  comments: Comment[]
+  novelId: string
+  chapterId?: string
+}
+
+export function CommentSection({ comments: initialComments, novelId, chapterId }: CommentSectionProps) {
+  const { user } = useAuth()
+  const [comments, setComments] = useState(initialComments)
+  const [content, setContent] = useState("")
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!content.trim() || !user) return
+
+    const newComment: Comment = {
+      id: `c-${Date.now()}`,
+      userId: user.id,
+      username: user.username,
+      avatarColor: user.avatarColor,
+      novelId,
+      chapterId,
+      content: content.trim(),
+      createdAt: new Date().toISOString().split("T")[0],
+    }
+    setComments((prev) => [newComment, ...prev])
+    setContent("")
+  }
+
+  return (
+    <div>
+      <h3 className="mb-4 text-lg font-bold text-foreground">
+        Bình luận ({comments.length})
+      </h3>
+
+      {/* Add comment form */}
+      {user ? (
+        <form onSubmit={handleSubmit} className="mb-6">
+          <div className="flex gap-3">
+            {user.avatarUrl ? (
+              <img src={user.avatarUrl} alt={user.username} className="h-8 w-8 shrink-0 rounded-full" />
+            ) : (
+              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-background ${user.avatarColor}`}>
+                {user.username.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1">
+              <Textarea
+                placeholder="Viết bình luận..."
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className="min-h-20 resize-none"
+              />
+              <div className="mt-2 flex justify-end">
+                <Button type="submit" size="sm" disabled={!content.trim()}>
+                  <Send className="mr-1.5 h-3.5 w-3.5" />
+                  Gửi
+                </Button>
+              </div>
+            </div>
+          </div>
+        </form>
+      ) : (
+        <div className="mb-6 rounded-lg border border-border bg-muted/50 p-4 text-center text-sm text-muted-foreground">
+          <Link href="/dang-nhap" className="font-medium text-primary hover:underline">Đăng nhập</Link> để viết bình luận.
+        </div>
+      )}
+
+      {/* Comments list */}
+      <div className="flex flex-col gap-4">
+        {comments.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Chưa có bình luận nào. Hãy là người đầu tiên!</p>
+        ) : (
+          comments.map((comment) => (
+            <div key={comment.id} className="flex gap-3">
+              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-background ${comment.avatarColor}`}>
+                {comment.username.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-foreground">{comment.username}</span>
+                  <span className="text-xs text-muted-foreground">{comment.createdAt}</span>
+                </div>
+                <p className="mt-1 text-sm leading-relaxed text-foreground/90">{comment.content}</p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
