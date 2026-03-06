@@ -8,6 +8,7 @@ import path from "path"
 import os from "os"
 import { promises as fs } from "fs"
 import { convert } from "html-to-text"
+import { slugify } from "@/lib/utils"
 
 export async function POST(req: Request) {
     const session = await getServerSession(authOptions)
@@ -71,12 +72,7 @@ export async function POST(req: Request) {
         let novelDesc = metadata.description || "Chưa có giới thiệu"
 
         // Generate base slug
-        const baseSlug = novelTitle
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/(^-|-$)+/g, "")
+        const baseSlug = slugify(novelTitle)
 
         let slug = baseSlug
         let slugCounter = 1

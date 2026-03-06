@@ -125,9 +125,11 @@ model Comment {
 }
 
 model Bookmark {
-  id        String   @id @default(cuid())
-  userId    String
-  novelId   String
+  id                String   @id @default(cuid())
+  userId            String
+  novelId           String
+  lastChapterId     String?
+  lastChapterNumber Int?
   
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   novel     Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)

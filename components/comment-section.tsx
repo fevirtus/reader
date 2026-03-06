@@ -19,22 +19,30 @@ export function CommentSection({ comments: initialComments, novelId, chapterId }
   const [comments, setComments] = useState(initialComments)
   const [content, setContent] = useState("")
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!content.trim() || !user) return
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-    const newComment: Comment = {
-      id: `c-${Date.now()}`,
-      userId: user.id,
-      username: user.username,
-      avatarColor: user.avatarColor,
-      novelId,
-      chapterId,
-      content: content.trim(),
-      createdAt: new Date().toISOString().split("T")[0],
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!content.trim() || !user || isSubmitting) return
+
+    setIsSubmitting(true)
+    try {
+      const res = await fetch(`/api/truyen/${novelId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: content.trim(), chapterId })
+      })
+
+      if (res.ok) {
+        const newComment = await res.json()
+        setComments((prev) => [newComment, ...prev])
+        setContent("")
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setIsSubmitting(false)
     }
-    setComments((prev) => [newComment, ...prev])
-    setContent("")
   }
 
   return (
@@ -62,7 +70,7 @@ export function CommentSection({ comments: initialComments, novelId, chapterId }
                 className="min-h-20 resize-none"
               />
               <div className="mt-2 flex justify-end">
-                <Button type="submit" size="sm" disabled={!content.trim()}>
+                <Button type="submit" size="sm" disabled={!content.trim() || isSubmitting}>
                   <Send className="mr-1.5 h-3.5 w-3.5" />
                   Gửi
                 </Button>

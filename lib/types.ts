@@ -59,4 +59,5 @@ export interface Bookmark {
   lastChapterId?: string
   lastChapterNumber?: number
   addedAt: string
+  novel?: any
 }

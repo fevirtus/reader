@@ -54,12 +54,22 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
 
     const loadVoices = () => {
       const available = speechSynthesis.getVoices()
+      // First try to find any Vietnamese voice ('vi-VN', 'Google Tiếng Việt', etc.)
       const viVoices = available.filter(
-        (v) => v.lang.startsWith("vi") || v.name.toLowerCase().includes("vietnam")
+        (v) => v.lang.startsWith("vi") || v.name.toLowerCase().includes("vietnam") || v.name.toLowerCase().includes("tiếng việt")
       )
-      const allUsable = viVoices.length > 0 ? viVoices : available.slice(0, 10)
+
+      // Filter out overly robotic generic fallbacks if we have good ones
+      const goodViVoices = viVoices.filter(v => v.name.includes("Google") || v.name.includes("Microsoft") || v.name.includes("Natural"))
+
+      const preferredViVoices = goodViVoices.length > 0 ? goodViVoices : viVoices
+
+      // If we still have NO vi voices, fallback to ALL voices so the user isn't stuck with an empty list
+      const allUsable = preferredViVoices.length > 0 ? preferredViVoices : available
+
       setVoices(allUsable)
       if (allUsable.length > 0 && !selectedVoiceURI) {
+        // Automatically default to the first Vietnamese voice if available, otherwise just the first system voice
         setSelectedVoiceURI(allUsable[0].voiceURI)
       }
     }
@@ -170,6 +180,11 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
         if (e.error !== "canceled" && e.error !== "interrupted") {
           setIsPlaying(false)
           releaseWakeLock()
+
+          if (e.error === "synthesis-failed" || e.error === "network") {
+            // Toast notification is tricky here without importing sonner, let's just log and stop cleanly without crashing
+            console.warn("Trình duyệt không hỗ trợ đọc giọng nói này hoặc bị lỗi kết nối.")
+          }
         }
       }
 

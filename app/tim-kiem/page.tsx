@@ -1,106 +1,111 @@
-"use client"
-
-import { useState, useMemo } from "react"
-import { useSearchParams } from "next/navigation"
+// Server component instead of client component
 import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { NovelCard } from "@/components/novel-card"
-import { novels, genres, searchNovels } from "@/lib/data"
+import { prisma } from "@/lib/prisma"
 
-export default function SearchPage() {
-  const searchParams = useSearchParams()
-  const initialQuery = searchParams.get("q") || ""
-  const initialSort = searchParams.get("sort") || "latest"
+export default async function SearchPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | undefined }>
+}) {
+  const resolvedParams = await searchParams
+  const q = resolvedParams.q || ""
+  const sortBy = resolvedParams.sort || "latest"
+  const genreFilter = resolvedParams.genreFilter || "all"
+  const statusFilter = resolvedParams.statusFilter || "all"
 
-  const [query, setQuery] = useState(initialQuery)
-  const [sortBy, setSortBy] = useState(initialSort)
-  const [genreFilter, setGenreFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
+  // Build where clause
+  let where: any = {}
 
-  const filteredNovels = useMemo(() => {
-    let results = query.trim() ? searchNovels(query) : [...novels]
+  if (q) {
+    where.OR = [
+      { title: { contains: q, mode: "insensitive" } },
+      { authorName: { contains: q, mode: "insensitive" } },
+    ]
+  }
 
-    if (genreFilter !== "all") {
-      results = results.filter((n) => n.genres.includes(genreFilter))
+  if (genreFilter !== "all") {
+    where.genres = {
+      some: {
+        genre: {
+          slug: genreFilter
+        }
+      }
     }
+  }
 
-    if (statusFilter !== "all") {
-      results = results.filter((n) => n.status === statusFilter)
-    }
+  if (statusFilter !== "all") {
+    where.status = statusFilter
+  }
 
-    switch (sortBy) {
-      case "popular":
-        results.sort((a, b) => b.views - a.views)
-        break
-      case "rating":
-        results.sort((a, b) => b.rating - a.rating)
-        break
-      case "name":
-        results.sort((a, b) => a.title.localeCompare(b.title))
-        break
-      case "latest":
-      default:
-        results.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime())
-    }
+  // Build order clause
+  let orderBy: any = {}
+  switch (sortBy) {
+    case "popular":
+      orderBy = { views: "desc" }
+      break
+    case "rating":
+      orderBy = { rating: "desc" }
+      break
+    case "name":
+      orderBy = { title: "asc" }
+      break
+    case "latest":
+    default:
+      orderBy = { updatedAt: "desc" }
+  }
 
-    return results
-  }, [query, sortBy, genreFilter, statusFilter])
+  const filteredNovels = await prisma.novel.findMany({
+    where,
+    orderBy,
+  })
+
+  const genres = await prisma.genre.findMany()
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <h1 className="mb-6 text-2xl font-bold text-foreground">Tìm Kiếm Truyện</h1>
 
-      {/* Search bar */}
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="search"
-          placeholder="Tìm theo tên truyện, tác giả..."
-          className="pl-9"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
+      {/* Search and Filters - This requires a client component wrapper ideally, but for now we can rely on standard form submissions to update searchParams */}
+      <form method="GET" action="/tim-kiem">
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            name="q"
+            type="search"
+            placeholder="Tìm theo tên truyện, tác giả..."
+            className="pl-9"
+            defaultValue={q}
+          />
+        </div>
 
-      {/* Filters */}
-      <div className="mb-6 flex flex-wrap gap-3">
-        <Select value={genreFilter} onValueChange={setGenreFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="Thể loại" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tất cả thể loại</SelectItem>
+        <div className="mb-6 flex flex-wrap gap-3">
+          <select name="genreFilter" defaultValue={genreFilter} className="flex h-9 items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50">
+            <option value="all">Tất cả thể loại</option>
             {genres.map((g) => (
-              <SelectItem key={g.slug} value={g.slug}>{g.name}</SelectItem>
+              <option key={g.slug} value={g.slug}>{g.name}</option>
             ))}
-          </SelectContent>
-        </Select>
+          </select>
 
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="Trạng thái" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tất cả</SelectItem>
-            <SelectItem value="Đang ra">Đang ra</SelectItem>
-            <SelectItem value="Hoàn thành">Hoàn thành</SelectItem>
-            <SelectItem value="Tạm ngưng">Tạm ngưng</SelectItem>
-          </SelectContent>
-        </Select>
+          <select name="statusFilter" defaultValue={statusFilter} className="flex h-9 items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50">
+            <option value="all">Tất cả trạng thái</option>
+            <option value="Đang ra">Đang ra</option>
+            <option value="Hoàn thành">Hoàn thành</option>
+            <option value="Tạm ngưng">Tạm ngưng</option>
+          </select>
 
-        <Select value={sortBy} onValueChange={setSortBy}>
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="Sắp xếp" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="latest">Mới nhất</SelectItem>
-            <SelectItem value="popular">Xem nhiều</SelectItem>
-            <SelectItem value="rating">Đánh giá cao</SelectItem>
-            <SelectItem value="name">Theo tên</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+          <select name="sort" defaultValue={sortBy} className="flex h-9 items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50">
+            <option value="latest">Mới nhất</option>
+            <option value="popular">Xem nhiều</option>
+            <option value="rating">Đánh giá cao</option>
+            <option value="name">Theo tên</option>
+          </select>
+
+          <button type="submit" className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium">Lọc</button>
+        </div>
+      </form>
 
       {/* Results */}
       <p className="mb-4 text-sm text-muted-foreground">{filteredNovels.length} kết quả</p>

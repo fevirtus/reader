@@ -8,6 +8,8 @@ import { prisma } from "@/lib/prisma"
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const novelId = searchParams.get("novelId")
+    const page = parseInt(searchParams.get("page") || "1")
+    const limit = parseInt(searchParams.get("limit") || "20")
 
     if (!novelId) {
         return NextResponse.json({ error: "novelId is required" }, { status: 400 })
@@ -15,8 +17,23 @@ export async function GET(req: Request) {
 
     try {
         await connectToMongoDB()
-        const chapters = await Chapter.find({ novelId }).sort({ number: 1 }).select("-content")
-        return NextResponse.json(chapters)
+        const skip = (page - 1) * limit
+
+        const [chapters, totalChapters] = await Promise.all([
+            Chapter.find({ novelId })
+                .sort({ number: 1 })
+                .skip(skip)
+                .limit(limit)
+                .select("-content"),
+            Chapter.countDocuments({ novelId })
+        ])
+
+        return NextResponse.json({
+            chapters,
+            totalChapters,
+            totalPages: Math.ceil(totalChapters / limit),
+            currentPage: page
+        })
     } catch (error) {
         console.error("GET Chapter Error:", error)
         return NextResponse.json({ error: "Failed to fetch chapters" }, { status: 500 })
@@ -68,5 +85,89 @@ export async function POST(req: Request) {
     } catch (error) {
         console.error("POST Chapter Error:", error)
         return NextResponse.json({ error: "Failed to create chapter" }, { status: 500 })
+    }
+}
+
+export async function PUT(req: Request) {
+    const session = await getServerSession(authOptions)
+    if (!session || (session.user.role !== "MOD" && session.user.role !== "ADMIN")) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    try {
+        const data = await req.json()
+        const { id, novelId, number, title, content } = data
+
+        // Xác minh truyện thuộc về Mod này
+        const novel = await prisma.novel.findFirst({
+            where: { id: novelId, uploaderId: session.user.id },
+        })
+
+        if (!novel) {
+            return NextResponse.json({ error: "Truyện không tồn tại hoặc không đủ quyền" }, { status: 403 })
+        }
+
+        await connectToMongoDB()
+
+        const updatedChapter = await Chapter.findOneAndUpdate(
+            { _id: id, novelId },
+            { number, title, content },
+            { new: true }
+        )
+
+        if (!updatedChapter) {
+            return NextResponse.json({ error: "Không tìm thấy chương" }, { status: 404 })
+        }
+
+        return NextResponse.json(updatedChapter)
+    } catch (error) {
+        console.error("PUT Chapter Error:", error)
+        return NextResponse.json({ error: "Failed to update chapter" }, { status: 500 })
+    }
+}
+
+export async function DELETE(req: Request) {
+    const session = await getServerSession(authOptions)
+    if (!session || (session.user.role !== "MOD" && session.user.role !== "ADMIN")) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    try {
+        const url = new URL(req.url)
+        const id = url.searchParams.get("id")
+        const novelId = url.searchParams.get("novelId")
+
+        if (!id || !novelId) {
+            return NextResponse.json({ error: "Thiếu ID chương hoặc ID truyện" }, { status: 400 })
+        }
+
+        // Xác minh truyện thuộc về Mod này
+        const novel = await prisma.novel.findFirst({
+            where: { id: novelId, uploaderId: session.user.id },
+        })
+
+        if (!novel) {
+            return NextResponse.json({ error: "Truyện không tồn tại hoặc không đủ quyền" }, { status: 403 })
+        }
+
+        await connectToMongoDB()
+
+        const deletedChapter = await Chapter.findOneAndDelete({ _id: id, novelId })
+
+        if (!deletedChapter) {
+            return NextResponse.json({ error: "Không tìm thấy chương" }, { status: 404 })
+        }
+
+        // Cập nhật lại số lượng chương trong Postgres
+        const totalChapters = await Chapter.countDocuments({ novelId })
+        await prisma.novel.update({
+            where: { id: novelId },
+            data: { totalChapters },
+        })
+
+        return NextResponse.json({ message: "Đã xóa chương thành công" })
+    } catch (error) {
+        console.error("DELETE Chapter Error:", error)
+        return NextResponse.json({ error: "Failed to delete chapter" }, { status: 500 })
     }
 }

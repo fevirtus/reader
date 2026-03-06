@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { BookOpen, Eye, BookMarked, User, Clock, Layers } from "lucide-react"
-import { genres, formatViews } from "@/lib/data"
+import { formatViews } from "@/lib/utils"
 import { GenreBadge } from "@/components/genre-badge"
 import { StarRating } from "@/components/star-rating"
 import { ChapterList } from "@/components/chapter-list"
@@ -10,8 +10,18 @@ import { prisma } from "@/lib/prisma"
 import connectToMongoDB from "@/lib/mongoose"
 import { Chapter } from "@/lib/models/chapter"
 
-export default async function NovelDetailPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function NovelDetailPage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ slug: string }>,
+  searchParams: Promise<{ page?: string }>
+}) {
   const { slug } = await params
+  const { page } = await searchParams
+
+  const currentPage = parseInt(page || "1")
+  const limit = 20
 
   const novel = await prisma.novel.findUnique({
     where: { slug },
@@ -26,12 +36,27 @@ export default async function NovelDetailPage({ params }: { params: Promise<{ sl
     notFound()
   }
 
+  // Increment view quietly
+  prisma.novel.update({
+    where: { id: novel.id },
+    data: { views: { increment: 1 } }
+  }).catch(e => console.error("Error incrementing view:", e))
+
   // Fetch chapters from MongoDB
   await connectToMongoDB()
-  const chapters = await Chapter.find({ novelId: novel.id })
-    .sort({ number: 1 })
-    .select("id novelId number title createdAt views")
-    .lean()
+  const skip = (currentPage - 1) * limit
+
+  const [chapters, totalChapters] = await Promise.all([
+    Chapter.find({ novelId: novel.id })
+      .sort({ number: 1 })
+      .skip(skip)
+      .limit(limit)
+      .select("id novelId number title createdAt views")
+      .lean(),
+    Chapter.countDocuments({ novelId: novel.id })
+  ])
+
+  const totalPages = Math.ceil(totalChapters / limit)
 
   // Convert Mongoose documents to plain objects for Server Component
   const formattedChapters = chapters.map(c => ({
@@ -44,7 +69,23 @@ export default async function NovelDetailPage({ params }: { params: Promise<{ sl
     content: "" // We don't fetch content for the list
   }))
 
-  const comments: any[] = [] // Temporarily empty until we implement comments
+  const commentsData = await prisma.comment.findMany({
+    where: { novelId: novel.id, chapterId: null },
+    include: { user: true },
+    orderBy: { createdAt: "desc" }
+  })
+
+  // Format explicitly as the CommentProp type
+  const comments = commentsData.map(c => ({
+    id: c.id,
+    userId: c.user.id,
+    username: c.user.name || "User",
+    avatarColor: c.user.image || "bg-primary",
+    novelId: c.novelId,
+    content: c.content,
+    createdAt: c.createdAt.toISOString().split("T")[0]
+  }))
+
   const novelGenres = novel.genres.map(ng => ng.genre) || []
 
   return (
@@ -77,7 +118,7 @@ export default async function NovelDetailPage({ params }: { params: Promise<{ sl
             </span>
           </div>
 
-          <StarRating rating={novel.rating} ratingCount={novel.ratingCount} interactive />
+          <StarRating rating={novel.rating} ratingCount={novel.ratingCount} novelId={novel.id} interactive />
 
           <div className="flex flex-wrap gap-1.5">
             {novelGenres.map((g) => (
@@ -99,7 +140,13 @@ export default async function NovelDetailPage({ params }: { params: Promise<{ sl
       <section className="mt-8">
         <h2 className="mb-3 text-lg font-bold text-foreground">Danh Sách Chương</h2>
         <div className="rounded-lg border border-border bg-card">
-          <ChapterList chapters={formattedChapters as any} novelSlug={novel.slug} />
+          <ChapterList
+            chapters={formattedChapters as any}
+            novelSlug={novel.slug}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalChapters={totalChapters}
+          />
         </div>
       </section>
 

@@ -19,60 +19,76 @@ export function BookmarkProvider({ children }: { children: ReactNode }) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
 
   useEffect(() => {
-    if (user) {
-      const stored = localStorage.getItem(`truyen-chu-bookmarks-${user.id}`)
-      if (stored) {
-        try {
-          setBookmarks(JSON.parse(stored))
-        } catch {
-          setBookmarks([])
-        }
-      } else {
+    let mounted = true
+    const fetchBookmarks = async () => {
+      if (!user) {
         setBookmarks([])
+        return
       }
-    } else {
-      setBookmarks([])
+      try {
+        const res = await fetch("/api/user/bookmarks")
+        if (res.ok) {
+          const data = await res.json()
+          if (mounted) setBookmarks(data)
+        }
+      } catch (e) {
+        console.error("Failed to fetch bookmarks", e)
+      }
     }
+    fetchBookmarks()
+    return () => { mounted = false }
   }, [user])
 
-  const persist = useCallback((newBookmarks: Bookmark[]) => {
-    if (user) {
-      localStorage.setItem(`truyen-chu-bookmarks-${user.id}`, JSON.stringify(newBookmarks))
-    }
-  }, [user])
+  const toggleBookmark = useCallback(async (novelId: string) => {
+    if (!user) return
 
-  const isBookmarked = useCallback((novelId: string) => {
-    return bookmarks.some((b) => b.novelId === novelId)
-  }, [bookmarks])
-
-  const toggleBookmark = useCallback((novelId: string) => {
+    // Optimistic update
     setBookmarks((prev) => {
       const exists = prev.find((b) => b.novelId === novelId)
-      const next = exists
-        ? prev.filter((b) => b.novelId !== novelId)
-        : [...prev, { novelId, addedAt: new Date().toISOString() }]
-      persist(next)
-      return next
-    })
-  }, [persist])
-
-  const updateProgress = useCallback((novelId: string, chapterId: string, chapterNumber: number) => {
-    setBookmarks((prev) => {
-      const idx = prev.findIndex((b) => b.novelId === novelId)
-      let next: Bookmark[]
-      if (idx >= 0) {
-        next = [...prev]
-        next[idx] = { ...next[idx], lastChapterId: chapterId, lastChapterNumber: chapterNumber }
-      } else {
-        next = [...prev, { novelId, lastChapterId: chapterId, lastChapterNumber: chapterNumber, addedAt: new Date().toISOString() }]
+      if (exists) {
+        return prev.filter((b) => b.novelId !== novelId)
       }
-      persist(next)
-      return next
+      return [...prev, { novelId, addedAt: new Date().toISOString() } as any]
     })
-  }, [persist])
+
+    try {
+      await fetch("/api/user/bookmarks", {
+        method: "POST",
+        body: JSON.stringify({ action: "toggle", novelId })
+      })
+    } catch (e) {
+      console.error(e)
+    }
+  }, [user])
+
+  const updateProgress = useCallback(async (novelId: string, chapterId: string, chapterNumber: number) => {
+    if (!user) return
+
+    // Optimistic update
+    setBookmarks((prev) => {
+      const exists = prev.find((b) => b.novelId === novelId)
+      if (exists) {
+        return prev.map(b => b.novelId === novelId ? { ...b, lastChapterId: chapterId, lastChapterNumber: chapterNumber } : b)
+      }
+      return [...prev, { novelId, lastChapterId: chapterId, lastChapterNumber: chapterNumber, addedAt: new Date().toISOString() } as any]
+    })
+
+    try {
+      await fetch("/api/user/bookmarks", {
+        method: "POST",
+        body: JSON.stringify({ action: "updateProgress", novelId, lastChapterId: chapterId, lastChapterNumber: chapterNumber })
+      })
+    } catch (e) {
+      console.error(e)
+    }
+  }, [user])
 
   const getProgress = useCallback((novelId: string) => {
     return bookmarks.find((b) => b.novelId === novelId)
+  }, [bookmarks])
+
+  const isBookmarked = useCallback((novelId: string) => {
+    return bookmarks.some((b) => b.novelId === novelId)
   }, [bookmarks])
 
   return (

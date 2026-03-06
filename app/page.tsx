@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { ArrowRight, BookOpen, Sparkles, Flame, Heart, Swords, Building2, Rocket, Crown, Laugh, Search, Shield } from "lucide-react"
 import { NovelCard } from "@/components/novel-card"
-import { genres } from "@/lib/data"
+
 import { prisma } from "@/lib/prisma"
 
 const iconMap: Record<string, React.ReactNode> = {
@@ -31,6 +31,10 @@ export default async function HomePage() {
   const topRated = await prisma.novel.findMany({
     take: 4,
     orderBy: { rating: "desc" },
+  })
+
+  const genres = await prisma.genre.findMany({
+    take: 8,
   })
 
   // get the most popular as featured (can be empty if DB is new)
@@ -147,7 +151,7 @@ export default async function HomePage() {
                 className="group flex items-center gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/30 hover:bg-accent/50"
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                  {iconMap[genre.icon] || <BookOpen className="h-5 w-5" />}
+                  {genre.icon && iconMap[genre.icon] ? iconMap[genre.icon] : <BookOpen className="h-5 w-5" />}
                 </span>
                 <div>
                   <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">{genre.name}</h3>

@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { BookOpen, Eye, Star } from "lucide-react"
-import { formatViews } from "@/lib/data"
+import { formatViews } from "@/lib/utils"
 
 export interface CardNovel {
   id: string

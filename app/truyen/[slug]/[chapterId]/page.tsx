@@ -34,7 +34,32 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
   }
 
   const maxChapter = await ChapterModel.countDocuments({ novelId: novel.id })
-  const comments: any[] = [] // Temporarily empty
+
+  const commentsData = await prisma.comment.findMany({
+    where: { novelId: novel.id, chapterId: chapter._id.toString() },
+    include: { user: true },
+    orderBy: { createdAt: "desc" }
+  })
+
+  const comments = commentsData.map(c => ({
+    id: c.id,
+    userId: c.user.id,
+    username: c.user.name || "User",
+    avatarColor: c.user.image || "bg-primary",
+    novelId: c.novelId,
+    chapterId: c.chapterId,
+    content: c.content,
+    createdAt: c.createdAt.toISOString().split("T")[0]
+  }))
+
+  // Increment views quietly (fire and forget to not block render)
+  Promise.all([
+    ChapterModel.updateOne({ _id: chapter._id }, { $inc: { views: 1 } }),
+    prisma.novel.update({
+      where: { id: novel.id },
+      data: { views: { increment: 1 } }
+    }).catch(e => console.error("Error incrementing novel views:", e))
+  ]).catch(e => console.error("Error updating views:", e))
 
   const hasPrev = chapterNumber > 1
   const hasNext = chapterNumber < maxChapter

@@ -5,7 +5,7 @@ import { BookOpen, BookMarked, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
 import { useBookmarks } from "@/lib/bookmark-context"
-import { getNovelById } from "@/lib/data"
+
 
 export default function BookshelfPage() {
   const { user } = useAuth()
@@ -24,12 +24,10 @@ export default function BookshelfPage() {
     )
   }
 
-  const bookmarkedNovels = bookmarks
-    .map((b) => {
-      const novel = getNovelById(b.novelId)
-      return novel ? { novel, bookmark: b } : null
-    })
-    .filter(Boolean) as Array<{ novel: NonNullable<ReturnType<typeof getNovelById>>; bookmark: typeof bookmarks[number] }>
+  const bookmarkedNovels = bookmarks.filter(b => b.novel).map(b => ({
+    novel: b.novel as any,
+    bookmark: b
+  }))
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
