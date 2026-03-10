@@ -5,6 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { NovelCard } from "@/components/novel-card"
 import { prisma } from "@/lib/prisma"
 
+export const dynamic = "force-dynamic"
+
 export default async function SearchPage({
   searchParams,
 }: {
@@ -60,6 +62,7 @@ export default async function SearchPage({
   const filteredNovels = await prisma.novel.findMany({
     where,
     orderBy,
+    take: 20,
   })
 
   const genres = await prisma.genre.findMany()

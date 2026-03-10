@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, Suspense, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,9 +14,12 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
-import { FileText, Loader2, Plus, ArrowLeft, Wand2, Edit, Trash2 } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { FileText, Loader2, Plus, ArrowLeft, Wand2, Edit, Trash2, Upload, Search } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
+// @ts-ignore
+import * as mammoth from "mammoth"
 
 interface Chapter {
     _id: string
@@ -70,10 +73,17 @@ function ChapterManager() {
     const [openDelete, setOpenDelete] = useState(false)
     const [deletingChapterId, setDeletingChapterId] = useState<string | null>(null)
 
+
     // Form states
     const [number, setNumber] = useState("")
     const [title, setTitle] = useState("")
     const [content, setContent] = useState("")
+
+    // Multi-upload states
+    const fileInputRef = useRef<HTMLInputElement>(null)
+    const [uploadingMulti, setUploadingMulti] = useState(false)
+    const [uploadProgress, setUploadProgress] = useState(0)
+    const [totalUpload, setTotalUpload] = useState(0)
 
     const fetchChapters = async (pageToFetch = 1) => {
         if (!novelId) return
@@ -136,6 +146,65 @@ function ChapterManager() {
         }
     }
 
+    const handleMultiFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || [])
+        if (files.length === 0 || !novelId) return
+
+        setUploadingMulti(true)
+        setTotalUpload(files.length)
+        setUploadProgress(0)
+
+        // Sort files by name to ensure order (e.g. Chapter 1, Chapter 2)
+        files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+
+        try {
+            let currentNumber = parseInt(number) || 1
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i]
+                let content = ""
+                if (file.name.endsWith(".txt")) {
+                    content = await file.text()
+                } else if (file.name.endsWith(".docx")) {
+                    const arrayBuffer = await file.arrayBuffer()
+                    const result = await mammoth.extractRawText({ arrayBuffer })
+                    content = result.value
+                } else {
+                    continue
+                }
+
+                if (!content.trim()) continue // Bỏ qua file rỗng
+
+                let fileTitle = file.name.replace(/\.[^/.]+$/, "")
+                
+                // Loại bỏ "Chương X: " khỏi file title nếu cần thiết
+                let cleanedTitle = fileTitle.replace(/^(Chương|Ch\.)\s*\d+\s*[:-]?\s*/i, "")
+                if (!cleanedTitle) cleanedTitle = fileTitle
+                
+                const res = await fetch("/api/mod/chuong", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ novelId, number: currentNumber, title: cleanedTitle, content }),
+                })
+
+                if (!res.ok) {
+                    const data = await res.json()
+                    throw new Error(data.error || `Lỗi khi lưu file ${file.name}`)
+                }
+
+                currentNumber++
+                setUploadProgress(i + 1)
+            }
+
+            toast.success(`Đã tải lên thành công ${files.length} chương!`)
+            fetchChapters()
+        } catch (error: any) {
+            toast.error(error.message)
+        } finally {
+            setUploadingMulti(false)
+            if (fileInputRef.current) fileInputRef.current.value = ""
+        }
+    }
+
     const handlePreviewOptimize = () => {
         let newChapters = [...chapters]
 
@@ -189,58 +258,10 @@ function ChapterManager() {
         }
     }
 
-    const handleOpenEdit = async (chapter: Chapter) => {
-        setEditingChapterId(chapter._id)
-        setNumber(chapter.number.toString())
-        setTitle(chapter.title)
-        setContent("") // Khởi tạo rỗng trong lúc chờ fetch nội dung
-        setOpenEdit(true)
-        setLoadingEditData(true)
 
-        try {
-            // Lấy chi tiết chương từ list db để có nội dung qua API GET /api/mod/chuong/[id] vừa tạo
-            const res = await fetch(`/api/mod/chuong/${chapter._id}`)
-            if (res.ok) {
-                const data = await res.json()
-                setContent(data.content)
-            } else {
-                toast.error("Không tải được nội dung chương")
-            }
-        } catch {
-            toast.error("Không tải được nội dung chương")
-        } finally {
-            setLoadingEditData(false)
-        }
-    }
+    // handleOpenEdit has been removed because edit is now via dedicated page
 
-    const handleEditSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
-        if (!number || !title || !content || !novelId || !editingChapterId) {
-            toast.error("Vui lòng điền đầy đủ")
-            return
-        }
-
-        setSubmitting(true)
-        try {
-            const res = await fetch("/api/mod/chuong", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: editingChapterId, novelId, number: parseInt(number), title, content }),
-            })
-
-            const resData = await res.json()
-            if (!res.ok) throw new Error(resData.error || "Cập nhật thất bại")
-
-            toast.success("Đã cập nhật chương thành công!")
-            setOpenEdit(false)
-            fetchChapters()
-        } catch (error: any) {
-            toast.error(error.message)
-        } finally {
-            setSubmitting(false)
-        }
-    }
-
+    // handleDelete remains the same
     const handleDelete = async () => {
         if (!deletingChapterId || !novelId) return
         setSubmitting(true)
@@ -285,11 +306,25 @@ function ChapterManager() {
                 </h1>
 
                 <div className="flex gap-3">
+
                     <Button variant="secondary" className="gap-2" onClick={() => {
                         setOpenOptimize(true)
                         setPreviewMode(false)
                     }} disabled={chapters.length === 0}>
                         <Wand2 className="h-4 w-4" /> Tối ưu hóa
+                    </Button>
+
+                    <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleMultiFileUpload} 
+                        multiple 
+                        accept=".txt,.docx" 
+                        className="hidden" 
+                    />
+                    <Button variant="secondary" className="gap-2" onClick={() => fileInputRef.current?.click()} disabled={uploadingMulti}>
+                        {uploadingMulti ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        {uploadingMulti ? `Đang tải lên ${uploadProgress}/${totalUpload}...` : "Tải lên hàng loạt"}
                     </Button>
 
                     <Dialog open={openAdd} onOpenChange={setOpenAdd}>
@@ -333,51 +368,6 @@ function ChapterManager() {
                                     </Button>
                                 </DialogFooter>
                             </form>
-                        </DialogContent>
-                    </Dialog>
-
-                    <Dialog open={openEdit} onOpenChange={setOpenEdit}>
-                        <DialogContent className="sm:max-w-[700px] h-[80vh] flex flex-col">
-                            <DialogHeader>
-                                <DialogTitle>Chỉnh Sửa Chương</DialogTitle>
-                                <DialogDescription>
-                                    Thay đổi nội dung hoặc thông tin chương truyện.
-                                </DialogDescription>
-                            </DialogHeader>
-                            {loadingEditData ? (
-                                <div className="flex-1 flex justify-center items-center">
-                                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                                </div>
-                            ) : (
-                                <form onSubmit={handleEditSubmit} className="flex flex-col gap-4 pt-4 flex-1 h-full overflow-hidden">
-                                    <div className="grid grid-cols-4 gap-4">
-                                        <div className="space-y-2 col-span-1">
-                                            <label className="text-sm font-medium">Chương số</label>
-                                            <Input type="number" value={number} onChange={(e) => setNumber(e.target.value)} required />
-                                        </div>
-                                        <div className="space-y-2 col-span-3">
-                                            <label className="text-sm font-medium">Tên chương</label>
-                                            <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
-                                        </div>
-                                    </div>
-                                    <div className="space-y-2 flex-1 flex flex-col h-full">
-                                        <label className="text-sm font-medium">Nội dung văn bản</label>
-                                        <Textarea
-                                            value={content}
-                                            onChange={(e) => setContent(e.target.value)}
-                                            className="flex-1 w-full p-4 resize-none min-h-[300px]"
-                                            required
-                                        />
-                                    </div>
-                                    <DialogFooter className="mt-auto pt-4">
-                                        <Button type="button" variant="outline" onClick={() => setOpenEdit(false)}>Hủy</Button>
-                                        <Button type="submit" disabled={submitting}>
-                                            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                            Lưu thay đổi
-                                        </Button>
-                                    </DialogFooter>
-                                </form>
-                            )}
                         </DialogContent>
                     </Dialog>
 
@@ -471,6 +461,7 @@ function ChapterManager() {
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
+
                 </div>
             </div>
 
@@ -498,9 +489,11 @@ function ChapterManager() {
                                         <td className="px-5 py-4 text-right">{ch.views}</td>
                                         <td className="px-5 py-4 text-right">
                                             <div className="flex items-center justify-end gap-2">
-                                                <Button size="sm" variant="outline" className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => handleOpenEdit(ch)}>
-                                                    <Edit className="w-4 h-4 mr-1" /> Sửa
-                                                </Button>
+                                                <Link href={`/mod/chuong/${ch._id}`}>
+                                                    <Button size="sm" variant="outline" className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+                                                        <Edit className="w-4 h-4 mr-1" /> Sửa
+                                                    </Button>
+                                                </Link>
                                                 <Button size="sm" variant="outline" className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => {
                                                     setDeletingChapterId(ch._id)
                                                     setOpenDelete(true)

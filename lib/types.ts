@@ -40,6 +40,7 @@ export interface User {
   email: string
   avatarColor: string
   avatarUrl?: string
+  role?: "USER" | "MOD" | "ADMIN"
   createdAt: string
 }
 

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useState } from "react"
-import { BookOpen, Menu, X, Search, User, LogOut, BookMarked } from "lucide-react"
+import { BookOpen, Menu, X, Search, User as UserIcon, LogOut, BookMarked, Shield } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet"
@@ -36,9 +36,9 @@ export function Header() {
     <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4">
         {/* Logo */}
-        <Link href="/" className="flex shrink-0 items-center gap-2">
+        <Link href="/" className="flex shrink-0 items-center gap-2 pr-2">
           <BookOpen className="h-5 w-5 text-primary" />
-          <span className="text-lg font-bold text-foreground">TruyenChu</span>
+          <span className="text-lg font-bold text-foreground">Virtus's Reader</span>
         </Link>
 
         {/* Desktop Nav */}
@@ -95,6 +95,17 @@ export function Header() {
                   <p className="text-xs text-muted-foreground">{user.email}</p>
                 </div>
                 <DropdownMenuSeparator />
+                {(user.role === "MOD" || user.role === "ADMIN") && (
+                  <>
+                    <DropdownMenuItem asChild>
+                      <Link href="/mod" className="flex items-center gap-2 text-primary font-medium">
+                        <Shield className="h-4 w-4" />
+                        Trang Quản Trị
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 <DropdownMenuItem asChild>
                   <Link href="/tu-sach" className="flex items-center gap-2">
                     <BookMarked className="h-4 w-4" />
@@ -155,13 +166,26 @@ export function Header() {
                     </Link>
                   ))}
                   {user && (
-                    <Link
-                      href="/tu-sach"
-                      onClick={() => setOpen(false)}
-                      className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
-                    >
-                      Tủ Sách
-                    </Link>
+                    <>
+                      {(user.role === "MOD" || user.role === "ADMIN") && (
+                        <Link
+                          href="/mod"
+                          onClick={() => setOpen(false)}
+                          className="rounded-md px-3 py-2 text-sm font-medium text-primary hover:bg-secondary flex items-center gap-2"
+                        >
+                          <Shield className="h-4 w-4" />
+                          Trang Quản Trị
+                        </Link>
+                      )}
+                      <Link
+                        href="/tu-sach"
+                        onClick={() => setOpen(false)}
+                        className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground flex items-center gap-2"
+                      >
+                        <BookMarked className="h-4 w-4" />
+                        Tủ Sách
+                      </Link>
+                    </>
                   )}
                 </nav>
                 {!user && (

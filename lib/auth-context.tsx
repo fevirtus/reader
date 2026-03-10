@@ -25,6 +25,7 @@ export function useAuth() {
       email: (sessionUser as any).email || "",
       avatarUrl: (sessionUser as any).image || "",
       avatarColor: "bg-blue-500", // Mặc định
+      role: (sessionUser as any).role || "USER",
       createdAt: new Date().toISOString().split("T")[0],
     }
   }, [sessionUser])

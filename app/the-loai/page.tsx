@@ -15,14 +15,22 @@ const iconMap: Record<string, React.ReactNode> = {
   Shield: <Shield className="h-6 w-6" />,
 }
 
+export const dynamic = "force-dynamic"
+
 export default async function GenresPage() {
-  const genres = await prisma.genre.findMany({
-    include: {
-      _count: {
-        select: { novels: true }
+  let genres: any[] = []
+
+  try {
+    genres = await prisma.genre.findMany({
+      include: {
+        _count: {
+          select: { novels: true }
+        }
       }
-    }
-  })
+    })
+  } catch (error) {
+    console.error("Failed to fetch genres during build/runtime", error)
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">

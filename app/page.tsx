@@ -17,28 +17,39 @@ const iconMap: Record<string, React.ReactNode> = {
   Shield: <Shield className="h-5 w-5" />,
 }
 
+export const dynamic = "force-dynamic"
+
 export default async function HomePage() {
-  const popularNovels = await prisma.novel.findMany({
-    take: 6,
-    orderBy: { views: "desc" },
-  })
+  let popularNovels: any[] = []
+  let latestNovels: any[] = []
+  let topRated: any[] = []
+  let genres: any[] = []
+  let featured = null
 
-  const latestNovels = await prisma.novel.findMany({
-    take: 6,
-    orderBy: { updatedAt: "desc" },
-  })
+  try {
+    popularNovels = await prisma.novel.findMany({
+      take: 20,
+      orderBy: { views: "desc" },
+    })
 
-  const topRated = await prisma.novel.findMany({
-    take: 4,
-    orderBy: { rating: "desc" },
-  })
+    latestNovels = await prisma.novel.findMany({
+      take: 20,
+      orderBy: { updatedAt: "desc" },
+    })
 
-  const genres = await prisma.genre.findMany({
-    take: 8,
-  })
+    topRated = await prisma.novel.findMany({
+      take: 4,
+      orderBy: { rating: "desc" },
+    })
 
-  // get the most popular as featured (can be empty if DB is new)
-  const featured = popularNovels[0]
+    genres = await prisma.genre.findMany({
+      take: 8,
+    })
+
+    featured = popularNovels.length > 0 ? popularNovels[0] : null
+  } catch (error) {
+    console.error("Failed to fetch data for homepage during build/runtime", error)
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -49,12 +60,10 @@ export default async function HomePage() {
             href={`/truyen/${featured.slug}`}
             className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card md:flex-row"
           >
-            <div className={`flex h-48 items-center justify-center bg-gradient-to-br ${featured.coverColor || "from-slate-700 to-slate-800"} md:h-auto md:w-72`}>
-              <BookOpen className="h-16 w-16 text-background/80" />
-            </div>
+            <img src={featured.coverUrl || "/default-cover.svg"} alt={featured.title} className="h-48 w-full object-cover md:h-auto md:w-72" />
             <div className="flex flex-1 flex-col justify-center gap-3 p-6">
               <span className="text-xs font-semibold uppercase tracking-wider text-primary">Truyện Nổi Bật</span>
-              <h1 className="text-2xl font-bold text-foreground group-hover:text-primary transition-colors text-balance md:text-3xl">
+              <h1 title={featured.title} className="text-2xl font-bold text-foreground group-hover:text-primary transition-colors text-balance md:text-3xl">
                 {featured.title}
               </h1>
               <p className="text-sm text-muted-foreground">Tác giả: {featured.authorName}</p>
@@ -119,11 +128,9 @@ export default async function HomePage() {
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
                   {idx + 1}
                 </span>
-                <div className={`flex h-12 w-9 shrink-0 items-center justify-center rounded bg-gradient-to-br ${novel.coverColor || "from-slate-700 to-slate-800"}`}>
-                  <BookOpen className="h-4 w-4 text-background/80" />
-                </div>
+                <img src={novel.coverUrl || "/default-cover.svg"} alt={novel.title} className="h-12 w-9 shrink-0 rounded object-cover" />
                 <div className="min-w-0 flex-1">
-                  <h3 className="truncate text-sm font-semibold text-foreground group-hover:text-primary transition-colors">{novel.title}</h3>
+                  <h3 title={novel.title} className="truncate text-sm font-semibold text-foreground group-hover:text-primary transition-colors">{novel.title}</h3>
                   <p className="text-xs text-muted-foreground">{novel.authorName} - Ch. {novel.totalChapters}</p>
                 </div>
                 <div className="flex items-center gap-1 text-sm font-semibold text-primary">

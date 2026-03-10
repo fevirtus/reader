@@ -2,13 +2,14 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ChevronLeft, ChevronRight, List } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ReadingSettings } from "@/components/reading-settings"
 import { CommentSection } from "@/components/comment-section"
-import { TTSPlayer } from "@/components/tts-player"
+import { ReaderFAB } from "@/components/reader-fab"
 import { ChapterReaderProgress } from "./chapter-reader-progress"
 import { prisma } from "@/lib/prisma"
 import connectToMongoDB from "@/lib/mongoose"
 import { Chapter as ChapterModel } from "@/lib/models/chapter"
+
+export const dynamic = "force-dynamic"
 
 export default async function ChapterReaderPage({ params }: { params: Promise<{ slug: string; chapterId: string }> }) {
   const { slug, chapterId } = await params
@@ -47,19 +48,14 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
     username: c.user.name || "User",
     avatarColor: c.user.image || "bg-primary",
     novelId: c.novelId,
-    chapterId: c.chapterId,
+    chapterId: c.chapterId || undefined,
     content: c.content,
     createdAt: c.createdAt.toISOString().split("T")[0]
   }))
 
-  // Increment views quietly (fire and forget to not block render)
-  Promise.all([
-    ChapterModel.updateOne({ _id: chapter._id }, { $inc: { views: 1 } }),
-    prisma.novel.update({
-      where: { id: novel.id },
-      data: { views: { increment: 1 } }
-    }).catch(e => console.error("Error incrementing novel views:", e))
-  ]).catch(e => console.error("Error updating views:", e))
+  // Increment chapter views quietly (fire and forget to not block render)
+  ChapterModel.updateOne({ _id: chapter._id }, { $inc: { views: 1 } })
+    .catch(e => console.error("Error updating chapter views:", e))
 
   const hasPrev = chapterNumber > 1
   const hasNext = chapterNumber < maxChapter
@@ -68,7 +64,7 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
   const paragraphs = chapter.content.split("\n").map((p: string) => p.trim()).filter(Boolean)
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6">
+    <div className="mx-auto max-w-4xl lg:max-w-screen-lg px-4 py-6 md:px-8">
       {/* Top navigation */}
       <div className="mb-6 flex flex-col gap-3">
         <Link href={`/truyen/${slug}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -76,12 +72,9 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
         </Link>
 
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-lg font-bold text-foreground">
+          <h1 className="text-lg font-bold text-foreground md:text-xl lg:text-2xl">
             Chương {chapter.number}: {chapter.title}
           </h1>
-          <div className="flex items-center gap-2">
-            <ReadingSettings />
-          </div>
         </div>
       </div>
 
@@ -113,7 +106,7 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
       </div>
 
       {/* Chapter content */}
-      <article className="chapter-content mb-8 rounded-lg border border-border bg-card p-6 font-serif text-foreground/90 md:p-8">
+      <article className="chapter-content mb-8 rounded-lg border border-border bg-card p-6 font-serif text-foreground/90 md:p-8 lg:p-12 text-justify">
         {paragraphs.map((text: string, idx: number) => (
           <p key={idx} data-p-index={idx} className="mb-4 last:mb-0">
             {text}
@@ -151,10 +144,11 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
         <CommentSection comments={comments} novelId={novel.id} chapterId={chapter._id.toString()} />
       </section>
 
-      {/* TTS Player */}
-      <TTSPlayer
-        paragraphs={paragraphs}
+      {/* Floating Reader Actions & TTS Player */}
+      <ReaderFAB
+        novelId={novel.id}
         novelSlug={slug}
+        paragraphs={paragraphs}
         currentChapter={chapterNumber}
         maxChapter={maxChapter}
         chapterTitle={`Chương ${chapter.number}: ${chapter.title}`}

@@ -39,7 +39,7 @@ export default function LoginPage() {
         <div className="mb-8 text-center">
           <Link href="/" className="inline-flex items-center gap-2 text-primary">
             <BookOpen className="h-6 w-6" />
-            <span className="text-xl font-bold text-foreground">TruyenChu</span>
+            <span className="text-xl font-bold text-foreground">Virtus's Reader</span>
           </Link>
           <h1 className="mt-6 text-2xl font-bold text-foreground">Chao mung ban</h1>
           <p className="mt-2 text-sm text-muted-foreground">

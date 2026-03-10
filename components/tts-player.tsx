@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Play, Pause, Square, SkipForward, SkipBack, Volume2, ChevronDown, ChevronUp, Minus, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 
 interface TTSPlayerProps {
@@ -14,16 +14,20 @@ interface TTSPlayerProps {
   currentChapter: number
   maxChapter: number
   chapterTitle: string
+  isOpen?: boolean
+  onClose?: () => void
+  isExpanded?: boolean
+  onExpandedChange?: (val: boolean) => void
 }
 
-export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, chapterTitle }: TTSPlayerProps) {
+export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, chapterTitle, isOpen = true, onClose, isExpanded = false, onExpandedChange }: TTSPlayerProps) {
   const router = useRouter()
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isPaused, setIsPaused] = useState(false)
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
   const [rate, setRate] = useState(1.0)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("")
-  const [isExpanded, setIsExpanded] = useState(false)
   const [autoNextChapter, setAutoNextChapter] = useState(true)
   const [isSupported, setIsSupported] = useState(false)
 
@@ -60,9 +64,35 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
       )
 
       // Filter out overly robotic generic fallbacks if we have good ones
-      const goodViVoices = viVoices.filter(v => v.name.includes("Google") || v.name.includes("Microsoft") || v.name.includes("Natural"))
+      let goodViVoices = viVoices.filter(v => 
+        v.name.includes("Google") || 
+        v.name.includes("Microsoft") || 
+        v.name.includes("Natural") ||
+        v.name.toLowerCase().includes("female") ||
+        v.name.toLowerCase().includes("nữ")
+      )
+
+      // Sort to prioritize female voices
+      goodViVoices.sort((a, b) => {
+        const aIsFemale = a.name.toLowerCase().includes("female") || a.name.toLowerCase().includes("nữ")
+        const bIsFemale = b.name.toLowerCase().includes("female") || b.name.toLowerCase().includes("nữ")
+        if (aIsFemale && !bIsFemale) return -1
+        if (!aIsFemale && bIsFemale) return 1
+        return 0
+      })
 
       const preferredViVoices = goodViVoices.length > 0 ? goodViVoices : viVoices
+
+      // Sort preferred voices again just to be sure if not using goodViVoices
+      if (preferredViVoices === viVoices) {
+        preferredViVoices.sort((a, b) => {
+          const aIsFemale = a.name.toLowerCase().includes("female") || a.name.toLowerCase().includes("nữ")
+          const bIsFemale = b.name.toLowerCase().includes("female") || b.name.toLowerCase().includes("nữ")
+          if (aIsFemale && !bIsFemale) return -1
+          if (!aIsFemale && bIsFemale) return 1
+          return 0
+        })
+      }
 
       // If we still have NO vi voices, fallback to ALL voices so the user isn't stuck with an empty list
       const allUsable = preferredViVoices.length > 0 ? preferredViVoices : available
@@ -113,7 +143,7 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
 
   // Highlight current paragraph in the DOM
   useEffect(() => {
-    if (!isPlaying) return
+    if (!isPlaying && !isPaused) return
 
     const articleEl = document.querySelector(".chapter-content")
     if (!articleEl) return
@@ -128,11 +158,11 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
       activeEl.classList.add("tts-active-paragraph")
       activeEl.scrollIntoView({ behavior: "smooth", block: "center" })
     }
-  }, [currentParagraphIndex, isPlaying])
+  }, [currentParagraphIndex, isPlaying, isPaused])
 
-  // Clean highlights when stopped
+  // Clean highlights when stopped completely (not playing and not paused)
   useEffect(() => {
-    if (!isPlaying) {
+    if (!isPlaying && !isPaused) {
       const articleEl = document.querySelector(".chapter-content")
       if (articleEl) {
         articleEl.querySelectorAll("p[data-p-index]").forEach((el) => {
@@ -140,13 +170,16 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
         })
       }
     }
-  }, [isPlaying])
+  }, [isPlaying, isPaused])
+
+
 
   const speakParagraph = useCallback(
     (index: number) => {
       if (index >= paragraphs.length) {
         // Chapter finished
         setIsPlaying(false)
+        setIsPaused(false)
         releaseWakeLock()
 
         if (autoNextChapter && currentChapter < maxChapter) {
@@ -179,6 +212,7 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
         console.error("TTS Playback Error:", e.error, e)
         if (e.error !== "canceled" && e.error !== "interrupted") {
           setIsPlaying(false)
+          setIsPaused(false)
           releaseWakeLock()
 
           if (e.error === "synthesis-failed" || e.error === "network") {
@@ -202,10 +236,12 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
       // Pause
       speechSynthesis.cancel()
       setIsPlaying(false)
+      setIsPaused(true)
       releaseWakeLock()
     } else {
       // Play / Resume
       setIsPlaying(true)
+      setIsPaused(false)
       acquireWakeLock()
       speakParagraph(currentParagraphIndex)
     }
@@ -214,9 +250,11 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
   const handleStop = useCallback(() => {
     speechSynthesis.cancel()
     setIsPlaying(false)
+    setIsPaused(false)
     setCurrentParagraphIndex(0)
     releaseWakeLock()
-  }, [releaseWakeLock])
+    onClose?.()
+  }, [releaseWakeLock, onClose])
 
   const handlePrevParagraph = useCallback(() => {
     const newIndex = Math.max(0, currentParagraphIndex - 1)
@@ -235,6 +273,51 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
       speakParagraph(newIndex)
     }
   }, [currentParagraphIndex, paragraphs.length, isPlaying, speakParagraph])
+
+  // Listen for clicks on paragraphs to jump TTS
+  useEffect(() => {
+    if (!isOpen) {
+      document.querySelector(".chapter-content")?.classList.remove("tts-selection-mode")
+      return
+    }
+
+    const articleEl = document.querySelector(".chapter-content")
+    if (!articleEl) return
+
+    articleEl.classList.add("tts-selection-mode")
+
+    const handleParagraphClick = (e: Event) => {
+      const target = e.currentTarget as HTMLElement
+      const idxStr = target.getAttribute("data-p-index")
+      if (idxStr !== null) {
+        const index = parseInt(idxStr, 10)
+        
+        // Stop current speech
+        speechSynthesis.cancel()
+        
+        // Set new index and play
+        setCurrentParagraphIndex(index)
+        setIsPlaying(true)
+        setIsPaused(false)
+        acquireWakeLock()
+        
+        // Since speakParagraph is a useCallback with all valid deps, it's safe to call here:
+        speakParagraph(index)
+      }
+    }
+
+    const pElements = articleEl.querySelectorAll("p[data-p-index]")
+    pElements.forEach((el) => {
+      el.addEventListener("click", handleParagraphClick)
+    })
+
+    return () => {
+      articleEl.classList.remove("tts-selection-mode")
+      pElements.forEach((el) => {
+        el.removeEventListener("click", handleParagraphClick)
+      })
+    }
+  }, [isOpen, acquireWakeLock, speakParagraph])
 
   // Auto-play TTS when coming from previous chapter auto-advance
   useEffect(() => {
@@ -259,7 +342,7 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
   return (
     <>
       {/* Floating TTS bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-md shadow-lg">
+      <div className={cn("fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-md shadow-[0_-4px_6px_-1px_rgb(0,0,0,0.1)] transition-transform duration-300", !isOpen && "translate-y-full")}>
         {/* Progress bar */}
         <div className="h-0.5 w-full bg-muted">
           <div
@@ -301,6 +384,22 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
               </span>
             </div>
 
+            {/* Voice Selection (Always accessible) */}
+            <div className="hidden md:block w-32 shrink-0">
+              <Select value={selectedVoiceURI} onValueChange={setSelectedVoiceURI}>
+                <SelectTrigger className="h-8 text-xs bg-muted/50 border-0">
+                  <SelectValue placeholder="Chọn giọng..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {voices.map((voice) => (
+                    <SelectItem key={voice.voiceURI} value={voice.voiceURI} className="text-[10px] py-1">
+                      {voice.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Speed control */}
             <div className="hidden items-center gap-1 sm:flex">
               <Button
@@ -327,17 +426,17 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
             </div>
 
             {/* Expand/Collapse */}
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsExpanded(!isExpanded)}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onExpandedChange?.(!isExpanded)}>
               {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
             </Button>
           </div>
 
           {/* Expanded settings */}
           {isExpanded && (
-            <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
+            <div className="mt-3 flex flex-col gap-4 border-t border-border pt-4">
               {/* Speed on mobile */}
               <div className="flex items-center gap-3 sm:hidden">
-                <span className="text-xs text-muted-foreground w-16 shrink-0">Toc do:</span>
+                <span className="text-xs font-medium text-muted-foreground w-16 shrink-0">Tốc độ:</span>
                 <Slider
                   value={[rate]}
                   min={0.5}
@@ -349,23 +448,25 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
                 <span className="w-10 text-right text-xs font-medium">{rate.toFixed(2)}x</span>
               </div>
 
-              {/* Voice selector */}
-              {voices.length > 1 && (
+              {/* Voice selector (Mobile only, desktop has it on main bar) */}
+              <div className="flex flex-col gap-1.5 md:hidden">
+                <label className="text-xs font-medium text-muted-foreground">Giọng đọc:</label>
                 <div className="flex items-center gap-3">
                   <Volume2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <select
-                    className="flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={selectedVoiceURI}
-                    onChange={(e) => setSelectedVoiceURI(e.target.value)}
-                  >
-                    {voices.map((v) => (
-                      <option key={v.voiceURI} value={v.voiceURI}>
-                        {v.name} ({v.lang})
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={selectedVoiceURI} onValueChange={setSelectedVoiceURI}>
+                    <SelectTrigger className="h-9 w-full bg-background text-xs">
+                      <SelectValue placeholder="Chọn giọng đọc..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {voices.map((voice) => (
+                        <SelectItem key={voice.voiceURI} value={voice.voiceURI} className="text-xs">
+                          {voice.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              )}
+              </div>
 
               {/* Auto next chapter toggle */}
               <label className="flex cursor-pointer items-center gap-3">
@@ -388,7 +489,7 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
                   />
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  Tu dong chuyen chuong {currentChapter < maxChapter ? `(chuong ${currentChapter + 1})` : "(da la chuong cuoi)"}
+                  Tự động chuyển chương {currentChapter < maxChapter ? `(chương ${currentChapter + 1})` : "(đã là chương cuối)"}
                 </span>
               </label>
             </div>
@@ -396,8 +497,8 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
         </div>
       </div>
 
-      {/* Spacer so content isn't hidden behind the player bar */}
-      <div className={cn("h-16", isExpanded && "h-44")} />
+      {/* Spacer so content isn't hidden behind the player bar - only active when open */}
+      <div className={cn("transition-all duration-300", isOpen ? (isExpanded ? "h-44" : "h-16") : "h-0")} />
 
       {/* TTS highlight styles */}
       <style>{`
@@ -409,6 +510,20 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
           margin-left: -0.75rem;
           margin-right: -0.75rem;
           transition: background 0.3s ease, color 0.3s ease;
+        }
+
+        .tts-selection-mode p[data-p-index] {
+          cursor: pointer;
+          transition: background 0.2s ease, padding 0.2s ease, margin 0.2s ease;
+          border-radius: 0.375rem;
+          padding-left: 0.75rem;
+          padding-right: 0.75rem;
+          margin-left: -0.75rem;
+          margin-right: -0.75rem;
+        }
+
+        .tts-selection-mode p[data-p-index]:hover:not(.tts-active-paragraph) {
+          background: hsl(var(--primary) / 0.15);
         }
       `}</style>
     </>

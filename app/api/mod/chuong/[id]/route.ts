@@ -26,15 +26,22 @@ export async function GET(
             return NextResponse.json({ error: "Chapter not found" }, { status: 404 })
         }
 
-        // Verify the moderator owns the related novel
+        // Verify the moderator owns the related novel (or is an ADMIN)
+        let novelQuery: any = { id: chapter.novelId }
+        if (session.user.role !== "ADMIN") {
+            novelQuery.uploaderId = session.user.id
+        }
+
         const novel = await prisma.novel.findFirst({
-            where: {
-                id: chapter.novelId,
-                uploaderId: session.user.id
-            }
+            where: novelQuery
         })
 
         if (!novel) {
+            console.log("Novel not found or unauthorized:", {
+                chapterNovelId: chapter.novelId,
+                userId: session.user.id,
+                role: session.user.role
+            })
             return NextResponse.json({ error: "Unauthorized access to this chapter" }, { status: 403 })
         }
 

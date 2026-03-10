@@ -78,6 +78,39 @@ export async function POST(req: Request) {
                 return NextResponse.json({ error: "Missing chapter info" }, { status: 400 })
             }
 
+            // Lấy bookmark cũ (nếu có)
+            const existingBookmark = await prisma.bookmark.findUnique({
+                where: {
+                    userId_novelId: {
+                        userId: session.user.id,
+                        novelId,
+                    }
+                }
+            })
+
+            let newReadChapters: number[] = []
+            let newHasCountedView = false
+            let shouldIncrementNovelView = false
+
+            if (existingBookmark) {
+                newReadChapters = existingBookmark.readChapters || []
+                newHasCountedView = existingBookmark.hasCountedView
+
+                // Nếu chương này chưa đọc, thêm vào mảng
+                if (!newReadChapters.includes(lastChapterNumber)) {
+                    newReadChapters.push(lastChapterNumber)
+                }
+
+                // Nếu đọc đủ 5 chương và chưa từng đếm view
+                if (newReadChapters.length >= 5 && !newHasCountedView) {
+                    newHasCountedView = true
+                    shouldIncrementNovelView = true
+                }
+            } else {
+                newReadChapters = [lastChapterNumber]
+                // Chưa đủ 5 chương ngay từ lần đầu tạo
+            }
+
             const bookmark = await prisma.bookmark.upsert({
                 where: {
                     userId_novelId: {
@@ -87,15 +120,27 @@ export async function POST(req: Request) {
                 },
                 update: {
                     lastChapterId,
-                    lastChapterNumber
+                    lastChapterNumber,
+                    readChapters: newReadChapters,
+                    hasCountedView: newHasCountedView
                 },
                 create: {
                     userId: session.user.id,
                     novelId,
                     lastChapterId,
-                    lastChapterNumber
+                    lastChapterNumber,
+                    readChapters: newReadChapters,
+                    hasCountedView: newHasCountedView
                 }
             })
+
+            if (shouldIncrementNovelView) {
+                await prisma.novel.update({
+                    where: { id: novelId },
+                    data: { views: { increment: 1 } }
+                })
+            }
+
             return NextResponse.json({ status: "updated", bookmark })
         }
 

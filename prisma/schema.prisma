@@ -68,18 +68,22 @@ enum Role {
 model Novel {
   id            String   @id @default(cuid())
   title         String
+  originalTitle String?
   slug          String   @unique
   authorName    String   // Tên tác giả nguyên bản của truyện
+  originalAuthorName String?
   uploaderId    String?  // Tham chiếu đến User (Mod/Admin) đã upload
   uploader      User?    @relation("AuthorNovels", fields: [uploaderId], references: [id], onDelete: SetNull)
   description   String   @db.Text
   coverColor    String?
+  coverUrl      String?
   status        String   @default("Đang ra") // "Đang ra", "Hoàn thành", "Tạm ngưng"
   totalChapters Int      @default(0)
   views         Int      @default(0)
   rating        Float    @default(0.0)
   ratingCount   Int      @default(0)
   bookmarkCount Int      @default(0)
+  trashWords    String[] @default([])
   
   genres        NovelGenre[]
   comments      Comment[]
@@ -130,6 +134,8 @@ model Bookmark {
   novelId           String
   lastChapterId     String?
   lastChapterNumber Int?
+  readChapters      Int[]    @default([])
+  hasCountedView    Boolean  @default(false)
   
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   novel     Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)

@@ -29,16 +29,19 @@ export async function POST(req: Request) {
 
     try {
         const data = await req.json()
-        const { title, authorName, description, genreIds = [] } = data
+        const { title, originalTitle, authorName, originalAuthorName, description, coverUrl, genreIds = [] } = data
         // Tạo slug từ title
         const slug = slugify(title)
 
         const newNovel = await prisma.novel.create({
             data: {
                 title,
+                originalTitle,
                 slug: slug,
                 authorName,
+                originalAuthorName,
                 description,
+                coverUrl,
                 uploaderId: session.user.id,
                 genres: {
                     create: genreIds.map((id: string) => ({
@@ -61,15 +64,18 @@ export async function PUT(req: Request) {
 
     try {
         const data = await req.json()
-        const { id, title, authorName, description, status, genreIds } = data
+        const { id, title, originalTitle, authorName, originalAuthorName, description, coverUrl, status, genreIds } = data
 
         // Update basic info and recreate genre relations
         const updatedNovel = await prisma.novel.update({
             where: { id: id, uploaderId: session.user.id }, // Make sure they own it
             data: {
                 title,
+                originalTitle,
                 authorName,
+                originalAuthorName,
                 description,
+                coverUrl,
                 status,
                 // Replace all existing genres if genreIds is provided
                 ...(genreIds !== undefined && {

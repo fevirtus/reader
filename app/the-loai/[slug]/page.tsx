@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma"
 import { NovelCard } from "@/components/novel-card"
 import { notFound } from "next/navigation"
 
+export const dynamic = "force-dynamic"
+
 export default async function GenreDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
 
@@ -25,7 +27,8 @@ export default async function GenreDetailPage({ params }: { params: Promise<{ sl
     },
     orderBy: {
       updatedAt: "desc"
-    }
+    },
+    take: 20
   })
 
   // Basic layout without sort for purely server side representation without search params. Optional searchParams can be added later if needed.

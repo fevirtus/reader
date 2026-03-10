@@ -54,11 +54,11 @@ export default function BookshelfPage() {
                 key={novel.id}
                 className="flex items-center gap-4 rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/20"
               >
-                <Link href={`/truyen/${novel.slug}`} className={`flex h-16 w-12 shrink-0 items-center justify-center rounded-md bg-gradient-to-br ${novel.coverColor}`}>
-                  <BookOpen className="h-5 w-5 text-background/80" />
+                <Link href={`/truyen/${novel.slug}`}>
+                  <img src={novel.coverUrl || "/default-cover.svg"} alt={novel.title} className="h-16 w-12 shrink-0 rounded-md object-cover hover:opacity-90" />
                 </Link>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <Link href={`/truyen/${novel.slug}`} className="truncate text-sm font-semibold text-foreground hover:text-primary transition-colors">
+                  <Link title={novel.title} href={`/truyen/${novel.slug}`} className="truncate text-sm font-semibold text-foreground hover:text-primary transition-colors">
                     {novel.title}
                   </Link>
                   <p className="text-xs text-muted-foreground">{novel.authorName}</p>

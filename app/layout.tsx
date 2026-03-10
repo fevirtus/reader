@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next'
 import { Be_Vietnam_Pro } from 'next/font/google'
-import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AuthProvider } from '@/lib/auth-context'
 import { BookmarkProvider } from '@/lib/bookmark-context'
@@ -15,7 +14,7 @@ const beVietnam = Be_Vietnam_Pro({
 })
 
 export const metadata: Metadata = {
-  title: 'TruyenChu - Đọc Truyện Chữ Online',
+  title: "Virtus's Reader - Đọc Truyện Chữ Online",
   description: 'Đọc truyện chữ online miễn phí - Tiên hiệp, Huyền huyễn, Ngôn tình, Kiếm hiệp và nhiều thể loại khác',
   generator: 'v0.app',
   icons: {
@@ -63,7 +62,6 @@ export default function RootLayout({
             </BookmarkProvider>
           </AuthProvider>
         </ThemeProvider>
-        <Analytics />
       </body>
     </html>
   )

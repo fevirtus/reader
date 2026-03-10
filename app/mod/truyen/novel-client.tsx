@@ -13,7 +13,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
-import { BookOpen, Loader2, Plus, Upload, Edit, Trash2 } from "lucide-react"
+import { BookOpen, Loader2, Plus, Upload, Edit, Trash2, LayoutGrid, List, Image as ImageIcon } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
 
@@ -24,6 +24,7 @@ interface Novel {
     authorName: string
     status: string
     totalChapters: number
+    coverUrl?: string
 }
 
 interface Genre {
@@ -40,9 +41,16 @@ export function NovelClient() {
 
     // Form states
     const [title, setTitle] = useState("")
+    const [originalTitle, setOriginalTitle] = useState("")
     const [authorName, setAuthorName] = useState("")
+    const [originalAuthorName, setOriginalAuthorName] = useState("")
     const [description, setDescription] = useState("")
+    const [coverUrl, setCoverUrl] = useState("")
     const [status, setStatus] = useState("Đang ra")
+    
+    // View state
+    const [viewMode, setViewMode] = useState<"list" | "grid">("list")
+    const [uploadingCover, setUploadingCover] = useState(false)
 
     // Edit states
     const [openEdit, setOpenEdit] = useState(false)
@@ -150,14 +158,17 @@ export function NovelClient() {
             const res = await fetch("/api/mod/truyen", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title, authorName, description, genreIds: selectedGenres }), // Can add status here later if API accepts it on create
+                body: JSON.stringify({ title, originalTitle, authorName, originalAuthorName, description, coverUrl, genreIds: selectedGenres }), // Can add status here later if API accepts it on create
             })
             if (!res.ok) throw new Error("Thêm mới thất bại")
             toast.success("Đã thêm truyện thành công!")
             setOpenAdd(false)
             setTitle("")
+            setOriginalTitle("")
             setAuthorName("")
+            setOriginalAuthorName("")
             setDescription("")
+            setCoverUrl("")
             setStatus("Đang ra")
             setSelectedGenres([])
             fetchNovels()
@@ -203,12 +214,47 @@ export function NovelClient() {
         }
     }
 
+    const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+
+        if (!file.type.startsWith('image/')) {
+            toast.error("Vui lòng chọn file hình ảnh")
+            e.target.value = ""
+            return
+        }
+
+        setUploadingCover(true)
+        const formData = new FormData()
+        formData.append("file", file)
+
+        try {
+            const res = await fetch("/api/mod/upload-cover", {
+                method: "POST",
+                body: formData,
+            })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error || "Lỗi khi tải lên ảnh bìa")
+
+            setCoverUrl(data.url)
+            toast.success("Tải ảnh bìa thành công!")
+        } catch (err: any) {
+            toast.error(err.message || "Có lỗi xảy ra khi xử lý ảnh bìa")
+        } finally {
+            setUploadingCover(false)
+            e.target.value = ""
+        }
+    }
+
     const handleOpenEdit = async (novel: Novel) => {
         setEditingNovel(novel)
         setTitle(novel.title)
         setAuthorName(novel.authorName)
         setStatus(novel.status)
         setDescription("")
+        setOriginalTitle("")
+        setOriginalAuthorName("")
+        setCoverUrl(novel.coverUrl || "")
         setOpenEdit(true)
         setLoadingEditData(true)
 
@@ -217,6 +263,8 @@ export function NovelClient() {
             if (res.ok) {
                 const data = await res.json()
                 setDescription(data.description || "")
+                setOriginalTitle(data.originalTitle || "")
+                setOriginalAuthorName(data.originalAuthorName || "")
                 if (data.genres && Array.isArray(data.genres)) {
                     setSelectedGenres(data.genres.map((g: any) => g.genreId))
                 } else {
@@ -247,8 +295,11 @@ export function NovelClient() {
                 body: JSON.stringify({
                     id: editingNovel.id,
                     title,
+                    originalTitle,
                     authorName,
+                    originalAuthorName,
                     description,
+                    coverUrl,
                     genreIds: selectedGenres,
                     status: status
                 }),
@@ -298,6 +349,27 @@ export function NovelClient() {
                 </h1>
 
                 <div className="flex gap-3">
+                    <div className="flex bg-muted rounded-md p-1">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className={`h-8 px-2 ${viewMode === 'list' ? 'bg-background shadow-sm' : ''}`}
+                            onClick={() => setViewMode('list')}
+                            title="Dạng danh sách"
+                        >
+                            <List className="h-4 w-4" />
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className={`h-8 px-2 ${viewMode === 'grid' ? 'bg-background shadow-sm' : ''}`}
+                            onClick={() => setViewMode('grid')}
+                            title="Dạng lưới"
+                        >
+                            <LayoutGrid className="h-4 w-4" />
+                        </Button>
+                    </div>
+
                     <input
                         type="file"
                         id="epub-upload"
@@ -319,7 +391,7 @@ export function NovelClient() {
                     <Dialog open={openAdd} onOpenChange={(val) => {
                         setOpenAdd(val);
                         if (val) {
-                            setTitle(""); setAuthorName(""); setDescription(""); setSelectedGenres([]); setNewGenreName("");
+                            setTitle(""); setOriginalTitle(""); setAuthorName(""); setOriginalAuthorName(""); setDescription(""); setCoverUrl(""); setSelectedGenres([]); setNewGenreName("");
                         }
                     }}>
                         <DialogTrigger asChild>
@@ -340,8 +412,31 @@ export function NovelClient() {
                                     <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Phàm Nhân Tu Tiên" autoFocus />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-sm font-medium">Tác giả gốc</label>
+                                    <label className="text-sm font-medium">Tên gốc (Tùy chọn)</label>
+                                    <Input value={originalTitle} onChange={(e) => setOriginalTitle(e.target.value)} placeholder="Ví dụ: 凡人修仙传" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Tác giả</label>
                                     <Input value={authorName} onChange={(e) => setAuthorName(e.target.value)} placeholder="Ví dụ: Vong Ngữ" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Tác giả gốc (Tùy chọn)</label>
+                                    <Input value={originalAuthorName} onChange={(e) => setOriginalAuthorName(e.target.value)} placeholder="Ví dụ: 忘语" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Ảnh bìa (Tùy chọn)</label>
+                                    <div className="flex gap-2">
+                                        <Input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} placeholder="URL ảnh..." className="flex-1" />
+                                        <input type="file" id="cover-upload-add" className="hidden" accept="image/*" onChange={handleCoverUpload} />
+                                        <Button type="button" variant="secondary" onClick={() => document.getElementById('cover-upload-add')?.click()} disabled={uploadingCover}>
+                                            {uploadingCover ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                                        </Button>
+                                    </div>
+                                    {coverUrl && (
+                                        <div className="mt-2 w-24 h-32 rounded border overflow-hidden">
+                                            <img src={coverUrl} alt="Preview" className="w-full h-full object-cover" />
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium">Thêm thể loại</label>
@@ -408,8 +503,31 @@ export function NovelClient() {
                                         <Input value={title} onChange={(e) => setTitle(e.target.value)} required />
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-sm font-medium">Tác giả gốc</label>
+                                        <label className="text-sm font-medium">Tên gốc (Tùy chọn)</label>
+                                        <Input value={originalTitle} onChange={(e) => setOriginalTitle(e.target.value)} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium">Tác giả</label>
                                         <Input value={authorName} onChange={(e) => setAuthorName(e.target.value)} required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium">Tác giả gốc (Tùy chọn)</label>
+                                        <Input value={originalAuthorName} onChange={(e) => setOriginalAuthorName(e.target.value)} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium">Ảnh bìa (Tùy chọn)</label>
+                                        <div className="flex gap-2">
+                                            <Input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} placeholder="URL ảnh..." className="flex-1" />
+                                            <input type="file" id="cover-upload-edit" className="hidden" accept="image/*" onChange={handleCoverUpload} />
+                                            <Button type="button" variant="secondary" onClick={() => document.getElementById('cover-upload-edit')?.click()} disabled={uploadingCover}>
+                                                {uploadingCover ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                                            </Button>
+                                        </div>
+                                        {coverUrl && (
+                                            <div className="mt-2 w-24 h-32 rounded border overflow-hidden">
+                                                <img src={coverUrl} alt="Preview" className="w-full h-full object-cover" />
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium">Cập nhật thể loại</label>
@@ -498,61 +616,119 @@ export function NovelClient() {
             </div>
 
             <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                        <thead className="text-xs uppercase bg-muted/50 text-muted-foreground border-b border-border">
-                            <tr>
-                                <th scope="col" className="px-5 py-4 font-semibold">Tên truyện</th>
-                                <th scope="col" className="px-5 py-4 font-semibold">Tác giả</th>
-                                <th scope="col" className="px-5 py-4 font-semibold">Số chương</th>
-                                <th scope="col" className="px-5 py-4 font-semibold">Trạng thái</th>
-                                <th scope="col" className="px-5 py-4 text-right font-semibold">Thao tác</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {loading ? (
-                                <tr><td colSpan={5} className="p-8 text-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></td></tr>
-                            ) : novels.length === 0 ? (
-                                <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Bạn chưa đăng truyện nào. Hãy thêm truyện mới!</td></tr>
-                            ) : (
-                                novels.map((novel) => (
-                                    <tr key={novel.id} className="border-b border-border hover:bg-muted/30 transition-colors last:border-0">
-                                        <td className="px-5 py-4 font-medium text-foreground">{novel.title}</td>
-                                        <td className="px-5 py-4 text-muted-foreground">{novel.authorName}</td>
-                                        <td className="px-5 py-4">
-                                            <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                                                {novel.totalChapters}
-                                            </span>
-                                        </td>
-                                        <td className="px-5 py-4">
-                                            <span className="bg-emerald-100 text-emerald-800 text-xs font-medium px-2.5 py-1 rounded-md dark:bg-emerald-900/40 dark:text-emerald-300">
-                                                {novel.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-5 py-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <Link href={`/mod/chuong?novelId=${novel.id}`}>
-                                                    <Button size="sm" variant="outline" className="h-8">
-                                                        Cập nhật chương
+                {viewMode === 'list' ? (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs uppercase bg-muted/50 text-muted-foreground border-b border-border">
+                                <tr>
+                                    <th scope="col" className="px-5 py-4 font-semibold">Tên truyện</th>
+                                    <th scope="col" className="px-5 py-4 font-semibold">Tác giả</th>
+                                    <th scope="col" className="px-5 py-4 font-semibold">Số chương</th>
+                                    <th scope="col" className="px-5 py-4 font-semibold">Trạng thái</th>
+                                    <th scope="col" className="px-5 py-4 text-right font-semibold">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {loading ? (
+                                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></td></tr>
+                                ) : novels.length === 0 ? (
+                                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Bạn chưa đăng truyện nào. Hãy thêm truyện mới!</td></tr>
+                                ) : (
+                                    novels.map((novel) => (
+                                        <tr key={novel.id} className="border-b border-border hover:bg-muted/30 transition-colors last:border-0">
+                                            <td className="px-5 py-4 font-medium text-foreground flex items-center gap-3">
+                                                {novel.coverUrl ? (
+                                                    <img src={novel.coverUrl} alt={novel.title} className="w-8 h-10 object-cover rounded shadow-sm hidden sm:block" />
+                                                ) : (
+                                                    <div className="w-8 h-10 bg-muted rounded shadow-sm hidden sm:flex items-center justify-center text-muted-foreground"><BookOpen className="w-4 h-4" /></div>
+                                                )}
+                                                {novel.title}
+                                            </td>
+                                            <td className="px-5 py-4 text-muted-foreground">{novel.authorName}</td>
+                                            <td className="px-5 py-4">
+                                                <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                                                    {novel.totalChapters}
+                                                </span>
+                                            </td>
+                                            <td className="px-5 py-4">
+                                                <span className="bg-emerald-100 text-emerald-800 text-xs font-medium px-2.5 py-1 rounded-md dark:bg-emerald-900/40 dark:text-emerald-300">
+                                                    {novel.status}
+                                                </span>
+                                            </td>
+                                            <td className="px-5 py-4 text-right">
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <Link href={`/mod/chuong?novelId=${novel.id}`}>
+                                                        <Button size="sm" variant="outline" className="h-8">
+                                                            Cập nhật chương
+                                                        </Button>
+                                                    </Link>
+                                                    <Button size="icon" variant="outline" className="h-8 w-8 text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => handleOpenEdit(novel)}>
+                                                        <Edit className="h-4 w-4" />
                                                     </Button>
-                                                </Link>
-                                                <Button size="icon" variant="outline" className="h-8 w-8 text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => handleOpenEdit(novel)}>
-                                                    <Edit className="h-4 w-4" />
-                                                </Button>
-                                                <Button size="icon" variant="outline" className="h-8 w-8 text-red-600 border-red-200 hover:bg-red-50" onClick={() => {
-                                                    setDeletingNovelId(novel.id)
-                                                    setOpenDelete(true)
-                                                }}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
+                                                    <Button size="icon" variant="outline" className="h-8 w-8 text-red-600 border-red-200 hover:bg-red-50" onClick={() => {
+                                                        setDeletingNovelId(novel.id)
+                                                        setOpenDelete(true)
+                                                    }}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div className="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+                        {loading ? (
+                            <div className="col-span-full py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                        ) : novels.length === 0 ? (
+                            <div className="col-span-full py-12 text-center text-muted-foreground">Bạn chưa đăng truyện nào. Hãy thêm truyện mới!</div>
+                        ) : (
+                            novels.map((novel) => (
+                                <div key={novel.id} className="group relative flex flex-col rounded-xl overflow-hidden border shadow-sm transition-all hover:-translate-y-1 hover:shadow-md bg-card">
+                                    <div className="aspect-[2/3] w-full bg-muted relative border-b">
+                                        {novel.coverUrl ? (
+                                            <img src={novel.coverUrl} alt={novel.title} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+                                                <BookOpen className="w-8 h-8 opacity-20" />
+                                                <span className="text-xs opacity-50 font-medium">No Cover</span>
                                             </div>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+                                        )}
+                                        <div className="absolute top-2 right-2">
+                                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm dark:bg-emerald-900 dark:text-emerald-300">
+                                                {novel.totalChapters} Chương
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="p-3 flex flex-col flex-1">
+                                        <h3 className="font-semibold text-sm line-clamp-2 leading-tight mb-1" title={novel.title}>{novel.title}</h3>
+                                        <p className="text-xs text-muted-foreground mb-3">{novel.authorName}</p>
+                                        
+                                        <div className="mt-auto grid grid-cols-2 gap-1.5">
+                                            <Button size="sm" variant="outline" className="w-full h-7 text-xs px-0" onClick={() => handleOpenEdit(novel)}>
+                                                <Edit className="h-3 w-3 mr-1" /> Sửa
+                                            </Button>
+                                            <Button size="sm" variant="outline" className="w-full h-7 text-xs px-0 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => {
+                                                setDeletingNovelId(novel.id)
+                                                setOpenDelete(true)
+                                            }}>
+                                                <Trash2 className="h-3 w-3 mr-1" /> Xóa
+                                            </Button>
+                                            <Link href={`/mod/chuong?novelId=${novel.id}`} className="col-span-2">
+                                                <Button size="sm" className="w-full h-7 text-xs">
+                                                    <List className="h-3 w-3 mr-1" /> DS Chương
+                                                </Button>
+                                            </Link>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     )

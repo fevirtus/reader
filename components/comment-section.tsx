@@ -7,14 +7,16 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth-context"
 import type { Comment } from "@/lib/types"
 import Link from "next/link"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface CommentSectionProps {
   comments: Comment[]
+  chapterComments?: Comment[]
   novelId: string
   chapterId?: string
 }
 
-export function CommentSection({ comments: initialComments, novelId, chapterId }: CommentSectionProps) {
+export function CommentSection({ comments: initialComments, chapterComments, novelId, chapterId }: CommentSectionProps) {
   const { user } = useAuth()
   const [comments, setComments] = useState(initialComments)
   const [content, setContent] = useState("")
@@ -84,27 +86,78 @@ export function CommentSection({ comments: initialComments, novelId, chapterId }
         </div>
       )}
 
-      {/* Comments list */}
-      <div className="flex flex-col gap-4">
-        {comments.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Chưa có bình luận nào. Hãy là người đầu tiên!</p>
-        ) : (
-          comments.map((comment) => (
-            <div key={comment.id} className="flex gap-3">
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-background ${comment.avatarColor}`}>
-                {comment.username.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground">{comment.username}</span>
-                  <span className="text-xs text-muted-foreground">{comment.createdAt}</span>
+      {/* Comments list with Tabs for Novel Details Page */}
+      {chapterComments ? (
+        <Tabs defaultValue="novel" className="w-full">
+          <TabsList className="mb-4">
+            <TabsTrigger value="novel">Bình luận Truyện ({comments.length})</TabsTrigger>
+            <TabsTrigger value="chapter">Bình luận Chương ({chapterComments.length})</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="novel" className="flex flex-col gap-4 mt-0">
+            {comments.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Chưa có bình luận nào cho truyện này. Hãy là người đầu tiên!</p>
+            ) : (
+              comments.map((comment) => (
+                <div key={comment.id} className="flex gap-3">
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-background ${comment.avatarColor}`}>
+                    {comment.username.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-foreground">{comment.username}</span>
+                      <span className="text-xs text-muted-foreground">{comment.createdAt}</span>
+                    </div>
+                    <p className="mt-1 text-sm leading-relaxed text-foreground/90">{comment.content}</p>
+                  </div>
                 </div>
-                <p className="mt-1 text-sm leading-relaxed text-foreground/90">{comment.content}</p>
+              ))
+            )}
+          </TabsContent>
+
+          <TabsContent value="chapter" className="flex flex-col gap-4 mt-0">
+            {chapterComments.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Chưa có bình luận nào trên các chương.</p>
+            ) : (
+              chapterComments.map((comment) => (
+                <div key={comment.id} className="flex gap-3">
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-background ${comment.avatarColor}`}>
+                    {comment.username.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-foreground">{comment.username}</span>
+                      <span className="text-xs text-muted-foreground">{comment.createdAt}</span>
+                    </div>
+                    <p className="mt-1 text-sm leading-relaxed text-foreground/90">{comment.content}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {comments.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">Chưa có bình luận nào. Hãy là người đầu tiên!</p>
+          ) : (
+            comments.map((comment) => (
+              <div key={comment.id} className="flex gap-3">
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-background ${comment.avatarColor}`}>
+                  {comment.username.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-foreground">{comment.username}</span>
+                    <span className="text-xs text-muted-foreground">{comment.createdAt}</span>
+                  </div>
+                  <p className="mt-1 text-sm leading-relaxed text-foreground/90">{comment.content}</p>
+                </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }
