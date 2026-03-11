@@ -342,7 +342,7 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
   return (
     <>
       {/* Floating TTS bar */}
-      <div className={cn("fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-md shadow-[0_-4px_6px_-1px_rgb(0,0,0,0.1)] transition-transform duration-300", !isOpen && "translate-y-full")}>
+      <div className={cn("fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md shadow-[0_-4px_6px_-1px_rgb(0,0,0,0.1)] transition-transform duration-300", !isOpen && "translate-y-full")}>
         {/* Progress bar */}
         <div className="h-0.5 w-full bg-muted">
           <div
@@ -351,25 +351,25 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
           />
         </div>
 
-        <div className="mx-auto max-w-3xl px-4 py-2">
+        <div className="mx-auto max-w-3xl px-2 py-1.5 sm:px-4 sm:py-2">
           {/* Compact bar */}
           <div className="flex items-center gap-3">
             {/* Play controls */}
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handlePrevParagraph} disabled={currentParagraphIndex <= 0}>
+              <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={handlePrevParagraph} disabled={currentParagraphIndex <= 0}>
                 <SkipBack className="h-4 w-4" />
               </Button>
               <Button
                 size="icon"
-                className="h-9 w-9 rounded-full"
+                className="h-8 w-8 rounded-full sm:h-9 sm:w-9"
                 onClick={handlePlay}
               >
                 {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
               </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleNextParagraph} disabled={currentParagraphIndex >= paragraphs.length - 1}>
+              <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={handleNextParagraph} disabled={currentParagraphIndex >= paragraphs.length - 1}>
                 <SkipForward className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleStop}>
+              <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={handleStop}>
                 <Square className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -426,7 +426,7 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
             </div>
 
             {/* Expand/Collapse */}
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onExpandedChange?.(!isExpanded)}>
+            <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={() => onExpandedChange?.(!isExpanded)}>
               {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
             </Button>
           </div>
@@ -498,7 +498,7 @@ export function TTSPlayer({ paragraphs, novelSlug, currentChapter, maxChapter, c
       </div>
 
       {/* Spacer so content isn't hidden behind the player bar - only active when open */}
-      <div className={cn("transition-all duration-300", isOpen ? (isExpanded ? "h-44" : "h-16") : "h-0")} />
+      <div className={cn("transition-all duration-300", isOpen ? (isExpanded ? "h-52 sm:h-44" : "h-16") : "h-0")} />
 
       {/* TTS highlight styles */}
       <style>{`

@@ -24,6 +24,9 @@ import * as mammoth from "mammoth"
 interface Chapter {
     _id: string
     number: number
+    volumeNumber?: number | null
+    volumeTitle?: string | null
+    volumeChapterNumber?: number | null
     title: string
     views: number
     createdAt: string
@@ -60,9 +63,11 @@ function ChapterManager() {
     const [openOptimize, setOpenOptimize] = useState(false)
     const [previewMode, setPreviewMode] = useState(false)
     const [optimizing, setOptimizing] = useState(false)
+    const [loadingOptimizeSource, setLoadingOptimizeSource] = useState(false)
     const [optRemovePrefix, setOptRemovePrefix] = useState(true)
     const [optRenumber, setOptRenumber] = useState(true)
     const [optimizedChapters, setOptimizedChapters] = useState<Chapter[]>([])
+    const [optimizeSourceChapters, setOptimizeSourceChapters] = useState<Chapter[]>([])
 
     // Edit states
     const [openEdit, setOpenEdit] = useState(false)
@@ -76,6 +81,9 @@ function ChapterManager() {
 
     // Form states
     const [number, setNumber] = useState("")
+    const [volumeNumber, setVolumeNumber] = useState("")
+    const [volumeTitle, setVolumeTitle] = useState("")
+    const [volumeChapterNumber, setVolumeChapterNumber] = useState("")
     const [title, setTitle] = useState("")
     const [content, setContent] = useState("")
 
@@ -115,6 +123,29 @@ function ChapterManager() {
         }
     }, [novelId, currentPage])
 
+    const fetchAllChaptersForOptimize = async (): Promise<Chapter[]> => {
+        if (!novelId) return []
+
+        const limit = 200
+        let page = 1
+        let total = 1
+        const all: Chapter[] = []
+
+        while (page <= total) {
+            const res = await fetch(`/api/mod/chuong?novelId=${novelId}&page=${page}&limit=${limit}`)
+            if (!res.ok) {
+                throw new Error("Không thể tải toàn bộ chương để tối ưu")
+            }
+
+            const data = await res.json()
+            all.push(...(data.chapters || []))
+            total = data.totalPages || 1
+            page++
+        }
+
+        return all.sort((a, b) => a.number - b.number)
+    }
+
     const handleAddSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!number || !title || !content || !novelId) {
@@ -127,7 +158,15 @@ function ChapterManager() {
             const res = await fetch("/api/mod/chuong", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ novelId, number: parseInt(number), title, content }),
+                body: JSON.stringify({
+                    novelId,
+                    number: parseInt(number),
+                    volumeNumber: volumeNumber ? parseInt(volumeNumber) : null,
+                    volumeTitle: volumeTitle.trim() || null,
+                    volumeChapterNumber: volumeChapterNumber ? parseInt(volumeChapterNumber) : null,
+                    title,
+                    content,
+                }),
             })
 
             const resData = await res.json()
@@ -137,6 +176,9 @@ function ChapterManager() {
             setOpenAdd(false)
             setTitle("")
             setContent("")
+            setVolumeNumber("")
+            setVolumeTitle("")
+            setVolumeChapterNumber("")
             setNumber((parseInt(number) + 1).toString())
             fetchChapters()
         } catch (error: any) {
@@ -205,38 +247,73 @@ function ChapterManager() {
         }
     }
 
-    const handlePreviewOptimize = () => {
-        let newChapters = [...chapters]
+    const handlePreviewOptimize = async () => {
+        if (!novelId) return
 
-        if (optRenumber) {
-            newChapters.sort((a, b) => a.number - b.number)
-            newChapters = newChapters.map((ch, idx) => ({
-                ...ch,
-                number: idx + 1
-            }))
+        if (!optRemovePrefix && !optRenumber) {
+            toast.error("Vui lòng chọn ít nhất một tùy chọn tối ưu hóa")
+            return
         }
 
-        if (optRemovePrefix) {
-            newChapters = newChapters.map((ch, i) => {
-                let newTitle = ch.title.replace(/^(Chương|Ch\.)\s*\d+\s*[:-]?\s*/i, "")
-                if (!newTitle) newTitle = `Chương ${ch.number}`
-                return { ...ch, title: newTitle }
-            })
-        }
+        setLoadingOptimizeSource(true)
 
-        setOptimizedChapters(newChapters)
-        setPreviewMode(true)
+        try {
+            const allChapters = await fetchAllChaptersForOptimize()
+            if (allChapters.length === 0) {
+                toast.info("Truyện này chưa có chương để tối ưu")
+                return
+            }
+
+            setOptimizeSourceChapters(allChapters)
+            let newChapters = [...allChapters]
+
+            if (optRenumber) {
+                newChapters.sort((a, b) => a.number - b.number)
+                newChapters = newChapters.map((ch, idx) => ({
+                    ...ch,
+                    number: idx + 1
+                }))
+            }
+
+            if (optRemovePrefix) {
+                newChapters = newChapters.map((ch) => {
+                    let newTitle = ch.title.replace(/^(Chương|Ch\.)\s*\d+\s*[:-]?\s*/i, "")
+                    if (!newTitle) newTitle = `Chương ${ch.number}`
+                    return { ...ch, title: newTitle }
+                })
+            }
+
+            setOptimizedChapters(newChapters)
+            setPreviewMode(true)
+            toast.success(`Đã tạo xem trước cho toàn bộ ${newChapters.length} chương`)
+        } catch (error: any) {
+            toast.error(error.message || "Không thể tạo bản xem trước")
+        } finally {
+            setLoadingOptimizeSource(false)
+        }
     }
 
     const handleApplyOptimize = async () => {
         if (optimizedChapters.length === 0) return
         setOptimizing(true)
         try {
-            const updates = optimizedChapters.map(ch => ({
-                id: ch._id,
-                title: ch.title,
-                number: ch.number
-            }))
+            const sourceById = new Map(optimizeSourceChapters.map((ch) => [ch._id, ch]))
+            const updates = optimizedChapters
+                .filter((ch) => {
+                    const old = sourceById.get(ch._id)
+                    return !!old && (old.number !== ch.number || old.title !== ch.title)
+                })
+                .map((ch) => ({
+                    id: ch._id,
+                    title: ch.title,
+                    number: ch.number
+                }))
+
+            if (updates.length === 0) {
+                toast.info("Không có thay đổi nào cần lưu")
+                setOptimizing(false)
+                return
+            }
 
             const res = await fetch("/api/mod/chuong/optimize", {
                 method: "PUT",
@@ -247,9 +324,11 @@ function ChapterManager() {
             const data = await res.json()
             if (!res.ok) throw new Error(data.error || "Lỗi tối ưu hóa")
 
-            toast.success(`Đã tổi ưu ${data.modifiedCount} chương!`)
+            toast.success(`Đã tối ưu ${data.modifiedCount} chương trên toàn bộ truyện!`)
             setOpenOptimize(false)
             setPreviewMode(false)
+            setOptimizedChapters([])
+            setOptimizeSourceChapters([])
             fetchChapters(currentPage)
         } catch (error: any) {
             toast.error(error.message)
@@ -298,6 +377,8 @@ function ChapterManager() {
         )
     }
 
+    const optimizeSourceMap = new Map(optimizeSourceChapters.map((source) => [source._id, source]))
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center bg-card p-4 rounded-xl border shadow-sm">
@@ -310,6 +391,8 @@ function ChapterManager() {
                     <Button variant="secondary" className="gap-2" onClick={() => {
                         setOpenOptimize(true)
                         setPreviewMode(false)
+                        setOptimizedChapters([])
+                        setOptimizeSourceChapters([])
                     }} disabled={chapters.length === 0}>
                         <Wand2 className="h-4 w-4" /> Tối ưu hóa
                     </Button>
@@ -341,12 +424,26 @@ function ChapterManager() {
                                 </DialogDescription>
                             </DialogHeader>
                             <form onSubmit={handleAddSubmit} className="flex flex-col gap-4 pt-4 flex-1 h-full overflow-hidden">
-                                <div className="grid grid-cols-4 gap-4">
+                                <div className="grid grid-cols-6 gap-4">
                                     <div className="space-y-2 col-span-1">
                                         <label className="text-sm font-medium">Chương số</label>
                                         <Input type="number" value={number} onChange={(e) => setNumber(e.target.value)} required />
                                     </div>
+                                    <div className="space-y-2 col-span-1">
+                                        <label className="text-sm font-medium">Quyển số</label>
+                                        <Input type="number" value={volumeNumber} onChange={(e) => setVolumeNumber(e.target.value)} placeholder="VD: 1" />
+                                    </div>
+                                    <div className="space-y-2 col-span-1">
+                                        <label className="text-sm font-medium">Chương trong quyển</label>
+                                        <Input type="number" value={volumeChapterNumber} onChange={(e) => setVolumeChapterNumber(e.target.value)} placeholder="VD: 5" />
+                                    </div>
                                     <div className="space-y-2 col-span-3">
+                                        <label className="text-sm font-medium">Tên quyển (Tuỳ chọn)</label>
+                                        <Input value={volumeTitle} onChange={(e) => setVolumeTitle(e.target.value)} placeholder="VD: Quyển 1 - Khởi đầu" />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-4 gap-4">
+                                    <div className="space-y-2 col-span-4">
                                         <label className="text-sm font-medium">Tên chương</label>
                                         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Thiếu niên kỳ bạt" required autoFocus />
                                     </div>
@@ -389,12 +486,23 @@ function ChapterManager() {
                         </DialogContent>
                     </Dialog>
 
-                    <Dialog open={openOptimize} onOpenChange={setOpenOptimize}>
+                    <Dialog
+                        open={openOptimize}
+                        onOpenChange={(nextOpen) => {
+                            setOpenOptimize(nextOpen)
+                            if (!nextOpen) {
+                                setPreviewMode(false)
+                                setOptimizedChapters([])
+                                setOptimizeSourceChapters([])
+                                setLoadingOptimizeSource(false)
+                            }
+                        }}
+                    >
                         <DialogContent className="sm:max-w-[800px] h-[80vh] flex flex-col">
                             <DialogHeader>
                                 <DialogTitle>Tối Ưu Hóa Chương Hàng Loạt</DialogTitle>
                                 <DialogDescription>
-                                    Công cụ dọn dẹp tên chương và đánh lại số thứ tự tự động tiện lợi sau khi đăng ép từ tệp EPUB.
+                                    Công cụ sẽ áp dụng trên toàn bộ chương của truyện hiện tại, không chỉ page bạn đang xem.
                                 </DialogDescription>
                             </DialogHeader>
 
@@ -425,8 +533,8 @@ function ChapterManager() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border">
-                                            {optimizedChapters.map((newCh, i) => {
-                                                const oldCh = chapters[i]
+                                            {optimizedChapters.map((newCh) => {
+                                                const oldCh = optimizeSourceMap.get(newCh._id) || newCh
                                                 return (
                                                     <tr key={newCh._id} className="hover:bg-muted/20">
                                                         <td className="px-4 py-3 border-r text-muted-foreground">
@@ -448,10 +556,13 @@ function ChapterManager() {
                             <DialogFooter className="mt-auto pt-2">
                                 <Button variant="outline" onClick={() => setOpenOptimize(false)}>Hủy bỏ</Button>
                                 {!previewMode ? (
-                                    <Button onClick={handlePreviewOptimize}>Kiểm tra trước</Button>
+                                    <Button onClick={handlePreviewOptimize} disabled={loadingOptimizeSource}>
+                                        {loadingOptimizeSource && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Kiểm tra toàn bộ truyện
+                                    </Button>
                                 ) : (
                                     <>
-                                        <Button variant="secondary" onClick={() => setPreviewMode(false)} disabled={optimizing}>Quay lại Option</Button>
+                                        <Button variant="secondary" onClick={() => setPreviewMode(false)} disabled={optimizing || loadingOptimizeSource}>Quay lại Option</Button>
                                         <Button onClick={handleApplyOptimize} disabled={optimizing}>
                                             {optimizing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                             Lưu thay đổi vào DB
@@ -471,6 +582,7 @@ function ChapterManager() {
                         <thead className="text-xs uppercase bg-muted/50 text-muted-foreground border-b border-border">
                             <tr>
                                 <th scope="col" className="px-5 py-4 font-semibold w-24">Chương</th>
+                                <th scope="col" className="px-5 py-4 font-semibold">Quyển</th>
                                 <th scope="col" className="px-5 py-4 font-semibold">Tên chương</th>
                                 <th scope="col" className="px-5 py-4 font-semibold text-right">Lượt đọc</th>
                                 <th scope="col" className="px-5 py-4 text-right font-semibold">Thao tác</th>
@@ -478,13 +590,18 @@ function ChapterManager() {
                         </thead>
                         <tbody>
                             {loading ? (
-                                <tr><td colSpan={4} className="p-8 text-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></td></tr>
+                                <tr><td colSpan={5} className="p-8 text-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></td></tr>
                             ) : chapters.length === 0 ? (
-                                <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Chưa có chương nào được đăng.</td></tr>
+                                <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Chưa có chương nào được đăng.</td></tr>
                             ) : (
                                 chapters.map((ch) => (
                                     <tr key={ch._id} className="border-b border-border hover:bg-muted/30 transition-colors last:border-0">
                                         <td className="px-5 py-4 font-medium text-foreground">Chương {ch.number}</td>
+                                        <td className="px-5 py-4 text-muted-foreground">
+                                            {ch.volumeNumber || ch.volumeTitle
+                                                ? `${ch.volumeTitle || `Quyển ${ch.volumeNumber}`}${ch.volumeChapterNumber ? ` · Ch.${ch.volumeChapterNumber}` : ""}`
+                                                : "-"}
+                                        </td>
                                         <td className="px-5 py-4 text-muted-foreground">{ch.title}</td>
                                         <td className="px-5 py-4 text-right">{ch.views}</td>
                                         <td className="px-5 py-4 text-right">

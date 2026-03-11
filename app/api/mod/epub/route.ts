@@ -9,6 +9,590 @@ import os from "os"
 import { promises as fs } from "fs"
 import { convert } from "html-to-text"
 import { slugify } from "@/lib/utils"
+import { uploadBufferToR2 } from "@/lib/r2"
+
+type SplitMode = "toc" | "regex"
+type SeriesMode = "none" | "existing" | "new"
+
+interface EpubSection {
+    sourceTitle: string
+    content: string
+}
+
+interface ParsedChapter {
+    title: string
+    content: string
+    detectedChapterNumber: number | null
+    finalNumber?: number
+    volumeNumber: number | null
+    volumeTitle: string | null
+    volumeChapterNumber: number | null
+    isPlaceholder?: boolean
+}
+
+interface EpubCoverAsset {
+    buffer: Buffer | null
+    mimeType: string | null
+    sourceId: string | null
+}
+
+const CHAPTER_REGEX_PRESETS: Record<string, string> = {
+    vi_chuong: "^(?:Chương|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+    en_chapter: "^(?:Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+    mix_chapter: "^(?:Chương|Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+    bracket_chapter: "^\\[?\\s*(?:Chương|Chapter)\\s*\\d+(?:\\.\\d+)?\\s*\\]?[^\\n]*$",
+}
+
+const NOISE_TITLE_REGEX = /^(?:mục lục|table of contents|toc|cover|bìa|copyright)$/i
+
+const SIMPLE_CHAPTER_TITLE_REGEX = /^(?:ch(?:ương|apter)?|ch\.)\s*\d+(?:\.\d+)?\s*:?$/i
+function normalizeMetaText(value: any, fallback: string) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim()
+    if (Array.isArray(value)) {
+        const first = value.find((v) => typeof v === "string" && v.trim().length > 0)
+        if (first) return first.trim()
+    }
+    return fallback
+}
+
+function extractVolumeNumber(title: string): number | null {
+    const matched = title.match(/(?:quy[eê]n|vol(?:ume)?|t[aạ]p|book|arc|hồi)\s*([0-9]+)/i)
+    if (!matched) return null
+    const parsed = Number(matched[1])
+    return Number.isFinite(parsed) ? parsed : null
+}
+
+function extractChapterNumber(title: string): number | null {
+    const matched = title.match(/(?:ch(?:ương|apter)?|ch\.)\s*([0-9]+(?:\.[0-9]+)?)/i)
+    if (!matched) return null
+    const parsed = Number(matched[1])
+    return Number.isFinite(parsed) ? parsed : null
+}
+
+function extractStrictChapterNumber(title: string): number | null {
+    const number = extractChapterNumber(title)
+    if (number === null) return null
+    if (!Number.isInteger(number)) return null
+    if (number <= 0) return null
+    if (number > 50000) return null
+    return number
+}
+
+function enhanceChapterTitleFromContent(title: string, content: string): { title: string; content: string } {
+    const lines = content.split(/\r?\n/)
+    const firstNonEmptyLineIndex = lines.findIndex((line) => line.trim().length > 0)
+    if (firstNonEmptyLineIndex < 0) return { title, content }
+
+    const firstLineRaw = lines[firstNonEmptyLineIndex]
+    const firstLine = firstLineRaw.trim()
+    if (!firstLine || firstLine.length > 140) return { title, content }
+
+    const baseTitle = title.trim()
+    const isSimpleBaseTitle = SIMPLE_CHAPTER_TITLE_REGEX.test(baseTitle)
+
+    if (!isSimpleBaseTitle) {
+        return { title, content }
+    }
+
+    let nextTitle = baseTitle
+
+    // Case 1: The first line already contains full chapter heading, use it directly.
+    if (/^(?:ch(?:ương|apter)?|ch\.)\s*\d+/i.test(firstLine) && firstLine.length > baseTitle.length + 2) {
+        nextTitle = firstLine
+    } else if (!SIMPLE_CHAPTER_TITLE_REGEX.test(firstLine) && !isVolumeHeading(firstLine) && !NOISE_TITLE_REGEX.test(firstLine)) {
+        // Case 2: TOC title is only "Chương N", subtitle is on next line.
+        nextTitle = `${baseTitle.replace(/[:\s]+$/g, "")}: ${firstLine}`
+    } else {
+        return { title, content }
+    }
+
+    const newLines = [...lines]
+    newLines.splice(firstNonEmptyLineIndex, 1)
+    const nextContent = newLines.join("\n").trim()
+
+    return {
+        title: nextTitle,
+        content: nextContent.length > 0 ? nextContent : content,
+    }
+}
+
+function isVolumeHeading(title: string): boolean {
+    return /^(?:quy[eê]n|vol(?:ume)?|t[aạ]p|book|arc|hồi)\s*[0-9]+(?:\s*[:-].*)?$/i.test(title.trim())
+}
+
+function normalizeSplitMode(value: FormDataEntryValue | null): SplitMode {
+    return value === "regex" ? "regex" : "toc"
+}
+
+function normalizeSeriesMode(value: FormDataEntryValue | null): SeriesMode {
+    if (value === "existing") return "existing"
+    if (value === "new") return "new"
+    return "none"
+}
+
+function readFormText(formData: FormData, key: string): string {
+    const value = formData.get(key)
+    return typeof value === "string" ? value.trim() : ""
+}
+
+async function resolveSeriesIdForEpubImport(options: {
+    mode: SeriesMode
+    seriesId: string
+    seriesName: string
+    userRole: "USER" | "MOD" | "ADMIN"
+    userId: string
+}) {
+    if (options.mode === "none") return null
+
+    if (options.mode === "existing") {
+        if (!options.seriesId) {
+            throw new Error("Thiếu series để thêm vào")
+        }
+
+        const targetSeries = await prisma.series.findFirst({
+            where: options.userRole === "ADMIN"
+                ? { id: options.seriesId }
+                : {
+                    id: options.seriesId,
+                    OR: [
+                        { novels: { some: { uploaderId: options.userId } } },
+                        { novels: { some: { uploaderId: null } } },
+                        { novels: { none: {} } },
+                    ],
+                },
+            select: { id: true },
+        })
+
+        if (!targetSeries) {
+            throw new Error("Series không tồn tại hoặc không đủ quyền")
+        }
+
+        return targetSeries.id
+    }
+
+    if (!options.seriesName) {
+        throw new Error("Thiếu tên series mới")
+    }
+
+    const existed = await prisma.series.findFirst({
+        where: { name: { equals: options.seriesName, mode: "insensitive" } },
+        select: { id: true },
+    })
+
+    if (existed) return existed.id
+
+    const baseSlug = slugify(options.seriesName)
+    let slug = baseSlug
+    let counter = 1
+
+    while (await prisma.series.findUnique({ where: { slug } })) {
+        slug = `${baseSlug}-${counter}`
+        counter += 1
+    }
+
+    const created = await prisma.series.create({
+        data: {
+            name: options.seriesName,
+            slug,
+        },
+        select: { id: true },
+    })
+
+    return created.id
+}
+
+function resolveRegexPattern(formData: FormData): { regexInput: string; regexPreset: string | null } {
+    const preset = readFormText(formData, "chapterRegexPreset")
+    const custom = readFormText(formData, "chapterRegex")
+
+    if (custom) {
+        return { regexInput: custom, regexPreset: preset || "custom" }
+    }
+
+    if (preset && CHAPTER_REGEX_PRESETS[preset]) {
+        return { regexInput: CHAPTER_REGEX_PRESETS[preset], regexPreset: preset }
+    }
+
+    return { regexInput: CHAPTER_REGEX_PRESETS.vi_chuong, regexPreset: "vi_chuong" }
+}
+
+function buildRegexFromInput(regexInput: string): { regex: RegExp; normalized: string } {
+    if (!regexInput || regexInput.length > 300) {
+        throw new Error("Regex không hợp lệ")
+    }
+
+    let pattern = regexInput
+    let flags = ""
+
+    const slashWrapped = regexInput.match(/^\/(.+)\/([gimsuy]*)$/)
+    if (slashWrapped) {
+        pattern = slashWrapped[1]
+        flags = slashWrapped[2]
+    }
+
+    const flagSet = new Set(flags.split(""))
+    flagSet.add("g")
+    flagSet.add("m")
+    const normalizedFlags = Array.from(flagSet).join("")
+    const regex = new RegExp(pattern, normalizedFlags)
+
+    return { regex, normalized: `/${pattern}/${normalizedFlags}` }
+}
+
+function enrichVolumeMetadata(chapters: Array<{ title: string; content: string }>): ParsedChapter[] {
+    let currentVolumeNumber: number | null = null
+    let currentVolumeTitle: string | null = null
+    let volumeChapterCounter = 0
+
+    return chapters.map((chapter) => {
+        const title = chapter.title.trim()
+
+        const explicitVolumeNumber = extractVolumeNumber(title)
+        if (explicitVolumeNumber !== null) {
+            if (currentVolumeNumber !== explicitVolumeNumber) {
+                volumeChapterCounter = 0
+            }
+
+            currentVolumeNumber = explicitVolumeNumber
+            currentVolumeTitle = isVolumeHeading(title)
+                ? title
+                : (currentVolumeTitle || `Quyển ${explicitVolumeNumber}`)
+        }
+
+        const explicitChapterNumber = extractChapterNumber(title)
+        let volumeChapterNumber: number | null = null
+
+        if (currentVolumeNumber !== null) {
+            if (explicitChapterNumber !== null) {
+                volumeChapterCounter = explicitChapterNumber
+            } else {
+                volumeChapterCounter += 1
+            }
+            volumeChapterNumber = volumeChapterCounter
+        }
+
+        return {
+            title,
+            content: chapter.content,
+            detectedChapterNumber: extractStrictChapterNumber(title),
+            volumeNumber: currentVolumeNumber,
+            volumeTitle: currentVolumeTitle,
+            volumeChapterNumber,
+        }
+    })
+}
+
+function buildChaptersFromTOCSections(sections: EpubSection[]): ParsedChapter[] {
+    const chapters: ParsedChapter[] = []
+
+    let currentVolumeNumber: number | null = null
+    let currentVolumeTitle: string | null = null
+    let currentVolumeChapterCounter = 0
+    let fallbackVolumeCounter = 0
+
+    for (let i = 0; i < sections.length; i++) {
+        const section = sections[i]
+        const rawTitle = section.sourceTitle || `Chương ${i + 1}`
+        const cleanTitle = rawTitle.replace(/\s+/g, " ").trim()
+        const cleanContent = section.content.trim()
+
+        if (!cleanContent) continue
+
+        if (isVolumeHeading(cleanTitle)) {
+            const extracted = extractVolumeNumber(cleanTitle)
+            if (extracted !== null) {
+                currentVolumeNumber = extracted
+            } else {
+                fallbackVolumeCounter += 1
+                currentVolumeNumber = fallbackVolumeCounter
+            }
+
+            currentVolumeTitle = cleanTitle
+            currentVolumeChapterCounter = 0
+
+            if (cleanContent.length <= 240) {
+                continue
+            }
+        }
+
+        if (NOISE_TITLE_REGEX.test(cleanTitle) && cleanContent.length <= 240) {
+            continue
+        }
+
+        const explicitVolumeFromTitle = extractVolumeNumber(cleanTitle)
+        if (explicitVolumeFromTitle !== null) {
+            if (currentVolumeNumber !== explicitVolumeFromTitle) {
+                currentVolumeChapterCounter = 0
+            }
+            currentVolumeNumber = explicitVolumeFromTitle
+            if (!currentVolumeTitle || isVolumeHeading(cleanTitle)) {
+                currentVolumeTitle = `Quyển ${explicitVolumeFromTitle}`
+            }
+        }
+
+        let volumeChapterNumber: number | null = null
+        const detectedChapterNumber = extractStrictChapterNumber(cleanTitle)
+        if (currentVolumeNumber !== null) {
+            const explicitChapter = extractChapterNumber(cleanTitle)
+            if (explicitChapter !== null) {
+                currentVolumeChapterCounter = explicitChapter
+            } else {
+                currentVolumeChapterCounter += 1
+            }
+            volumeChapterNumber = currentVolumeChapterCounter
+        }
+
+        const enhanced = enhanceChapterTitleFromContent(cleanTitle, cleanContent)
+
+        chapters.push({
+            title: enhanced.title,
+            content: enhanced.content,
+            detectedChapterNumber,
+            volumeNumber: currentVolumeNumber,
+            volumeTitle: currentVolumeTitle,
+            volumeChapterNumber,
+        })
+    }
+
+    return chapters
+}
+
+function buildChaptersFromRegexSections(sections: EpubSection[], regex: RegExp): ParsedChapter[] {
+    const combinedText = sections
+        .map((section) => section.content.trim())
+        .filter(Boolean)
+        .join("\n\n")
+
+    const matches = Array.from(combinedText.matchAll(regex))
+    if (matches.length === 0) {
+        return []
+    }
+
+    const parsed: Array<{ title: string; content: string }> = []
+
+    for (let i = 0; i < matches.length; i++) {
+        const match = matches[i]
+        if (match.index === undefined) continue
+
+        const nextMatch = matches[i + 1]
+        const headingRaw = (match[1] || match[0] || "").replace(/\s+/g, " ").trim()
+        const sectionStart = match.index + match[0].length
+        const sectionEnd = nextMatch?.index ?? combinedText.length
+        const body = combinedText.slice(sectionStart, sectionEnd).trim()
+
+        if (!headingRaw || body.length === 0) {
+            continue
+        }
+
+        const enhanced = enhanceChapterTitleFromContent(headingRaw, body)
+
+        parsed.push({
+            title: enhanced.title,
+            content: enhanced.content,
+        })
+    }
+
+    return enrichVolumeMetadata(parsed)
+}
+
+function withMissingChapterPlaceholders(chapters: ParsedChapter[]): {
+    chapters: ParsedChapter[]
+    insertedCount: number
+    detectedMax: number
+    detectedNumberAssignments: number
+} {
+    const detectedNumbers = chapters
+        .map((chapter) => chapter.detectedChapterNumber)
+        .filter((n): n is number => typeof n === "number" && Number.isInteger(n) && n > 0)
+
+    let insertedCount = 0
+    let detectedNumberAssignments = 0
+    let currentNumber = 0
+    const maxDetected = detectedNumbers.length > 0 ? Math.max(...detectedNumbers) : chapters.length
+    const normalized: ParsedChapter[] = []
+    const MAX_ALLOWED_GAP = 40
+
+    for (const chapter of chapters) {
+        const detected = chapter.detectedChapterNumber
+        const canUseDetected =
+            typeof detected === "number" &&
+            detected > currentNumber &&
+            detected - currentNumber <= MAX_ALLOWED_GAP
+
+        if (canUseDetected) {
+            for (let missing = currentNumber + 1; missing < detected; missing++) {
+                insertedCount += 1
+                normalized.push({
+                    title: `Chương ${missing} (Thiếu)`,
+                    content: `[THIEU CHUONG ${missing}]\n\nNoi dung chuong nay dang thieu tu EPUB goc. Vui long bo sung sau.`,
+                    detectedChapterNumber: missing,
+                    finalNumber: missing,
+                    volumeNumber: null,
+                    volumeTitle: null,
+                    volumeChapterNumber: null,
+                    isPlaceholder: true,
+                })
+            }
+
+            detectedNumberAssignments += 1
+            currentNumber = detected
+            normalized.push({
+                ...chapter,
+                finalNumber: currentNumber,
+                volumeChapterNumber: chapter.volumeChapterNumber,
+            })
+            continue
+        }
+
+        currentNumber += 1
+        normalized.push({
+            ...chapter,
+            finalNumber: currentNumber,
+            volumeChapterNumber: chapter.volumeChapterNumber,
+        })
+    }
+
+    return {
+        chapters: normalized,
+        insertedCount,
+        detectedMax: maxDetected,
+        detectedNumberAssignments,
+    }
+}
+
+async function extractCoverFromEpub(epub: any): Promise<EpubCoverAsset> {
+    const manifest = epub.manifest || {}
+    const metadataCover = epub.metadata?.cover ? String(epub.metadata.cover) : null
+
+    const candidateIds: string[] = []
+    if (metadataCover) candidateIds.push(metadataCover)
+
+    for (const [key, value] of Object.entries(manifest)) {
+        const item = value as any
+        const id = String(item?.id || key)
+        const href = String(item?.href || "")
+        const mediaType = String(item?.mediaType || item?.["media-type"] || "")
+        const properties = String(item?.properties || "")
+
+        if (
+            /cover-image/i.test(properties) ||
+            /cover/i.test(id) ||
+            /cover/i.test(href)
+        ) {
+            candidateIds.push(id)
+            continue
+        }
+
+        if (/image\//i.test(mediaType) && /cover/i.test(href)) {
+            candidateIds.push(id)
+        }
+    }
+
+    const uniqueCandidateIds = Array.from(new Set(candidateIds.filter(Boolean)))
+    if (uniqueCandidateIds.length === 0) {
+        return { buffer: null, mimeType: null, sourceId: null }
+    }
+
+    for (const id of uniqueCandidateIds) {
+        const fromImage = await new Promise<EpubCoverAsset>((resolve) => {
+            if (typeof epub.getImage !== "function") {
+                resolve({ buffer: null, mimeType: null, sourceId: null })
+                return
+            }
+
+            epub.getImage(id, (err: any, data: any, mimeType?: string) => {
+                if (err || !data) {
+                    resolve({ buffer: null, mimeType: null, sourceId: null })
+                    return
+                }
+
+                const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data)
+                resolve({ buffer, mimeType: typeof mimeType === "string" ? mimeType : null, sourceId: id })
+            })
+        })
+
+        if (fromImage.buffer) {
+            return fromImage
+        }
+
+        const fromFile = await new Promise<EpubCoverAsset>((resolve) => {
+            if (typeof epub.getFile !== "function") {
+                resolve({ buffer: null, mimeType: null, sourceId: null })
+                return
+            }
+
+            epub.getFile(id, (err: any, data: any, mimeType?: string) => {
+                if (err || !data) {
+                    resolve({ buffer: null, mimeType: null, sourceId: null })
+                    return
+                }
+
+                const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data)
+                resolve({ buffer, mimeType: typeof mimeType === "string" ? mimeType : null, sourceId: id })
+            })
+        })
+
+        if (fromFile.buffer) {
+            return fromFile
+        }
+    }
+
+    return { buffer: null, mimeType: null, sourceId: null }
+}
+
+async function saveCoverBufferToR2(cover: EpubCoverAsset): Promise<string | null> {
+    if (!cover.buffer) return null
+
+    return uploadBufferToR2({
+        buffer: cover.buffer,
+        contentType: cover.mimeType,
+        keyPrefix: "covers/epub",
+        fileNameHint: cover.sourceId || undefined,
+    })
+}
+
+async function parseEpubSections(tempFilePath: string): Promise<{ metadata: any; sections: EpubSection[]; cover: EpubCoverAsset }> {
+    return new Promise((resolve, reject) => {
+        const EPub = require("epub2").EPub || require("epub2")
+        const epub = new EPub(tempFilePath, "", "")
+
+        epub.on("error", (err: any) => reject(err))
+        epub.on("end", async () => {
+            try {
+                const metadata = epub.metadata
+                const flow = epub.flow
+                const sections: EpubSection[] = []
+                const cover = await extractCoverFromEpub(epub)
+
+                for (let i = 0; i < flow.length; i++) {
+                    const item = flow[i]
+                    const text = await new Promise<string>((res) => {
+                        epub.getChapter(item.id, (err: any, data: string) => {
+                            if (err) res("")
+                            else res(data)
+                        })
+                    })
+
+                    if (!text || text.trim().length === 0) continue
+
+                    const plainText = convert(text, { wordwrap: false }).trim()
+                    if (!plainText) continue
+
+                    sections.push({
+                        sourceTitle: item.title || `Mục ${i + 1}`,
+                        content: plainText,
+                    })
+                }
+
+                resolve({ metadata, sections, cover })
+            } catch (err) {
+                reject(err)
+            }
+        })
+
+        epub.parse()
+    })
+}
 
 export async function POST(req: Request) {
     const session = await getServerSession(authOptions)
@@ -19,6 +603,12 @@ export async function POST(req: Request) {
     try {
         const formData = await req.formData()
         const epubFile = formData.get("file") as File
+        const previewOnly = String(formData.get("preview") || "").toLowerCase() === "true"
+        const splitMode = normalizeSplitMode(formData.get("splitMode"))
+        const seriesMode = normalizeSeriesMode(formData.get("seriesMode"))
+        const seriesIdInput = readFormText(formData, "seriesId")
+        const seriesNameInput = readFormText(formData, "seriesName")
+
         if (!epubFile) {
             return NextResponse.json({ error: "Thiếu file EPUB" }, { status: 400 })
         }
@@ -27,49 +617,116 @@ export async function POST(req: Request) {
         const tempFilePath = path.join(os.tmpdir(), `upload-${Date.now()}.epub`)
         await fs.writeFile(tempFilePath, buffer)
 
-        // Phân tích EPUB file
-        const parsedData = await new Promise<any>((resolve, reject) => {
-            const EPub = require("epub2").EPub || require("epub2")
-            const epub = new EPub(tempFilePath, "", "")
+        let parsedData: any = null
+        try {
+            const { metadata, sections, cover } = await parseEpubSections(tempFilePath)
 
-            epub.on("error", (err: any) => reject(err))
-            epub.on("end", async () => {
-                const metadata = epub.metadata
-                const flow = epub.flow // TOC array
-                const chapters = []
+            let regexNormalized: string | null = null
+            let regexPreset: string | null = null
+            let chapters: ParsedChapter[] = []
 
-                for (let i = 0; i < flow.length; i++) {
-                    const chapterData = flow[i]
-                    const text = await new Promise<string>((res) => {
-                        epub.getChapter(chapterData.id, (err: any, d: string) => {
-                            if (err) res("")
-                            else res(d)
-                        })
-                    })
+            if (splitMode === "regex") {
+                const regexResolved = resolveRegexPattern(formData)
+                const compiled = buildRegexFromInput(regexResolved.regexInput)
+                chapters = buildChaptersFromRegexSections(sections, compiled.regex)
+                regexNormalized = compiled.normalized
+                regexPreset = regexResolved.regexPreset
 
-                    if (text && text.trim().length > 0) {
-                        const plainText = convert(text, { wordwrap: false })
-                        chapters.push({
-                            title: chapterData.title || `Chương ${i + 1}`,
-                            content: plainText
-                        })
-                    }
+                if (chapters.length === 0) {
+                    return NextResponse.json(
+                        {
+                            error: "Regex không tách được chương nào. Hãy thử regex khác hoặc chuyển về TOC.",
+                            parserInfo: {
+                                splitMode,
+                                chapterRegexUsed: regexNormalized,
+                                regexPreset,
+                                sourceSections: sections.length,
+                                chaptersDetected: 0,
+                            }
+                        },
+                        { status: 400 }
+                    )
                 }
+            } else {
+                chapters = buildChaptersFromTOCSections(sections)
+                if (chapters.length === 0) {
+                    return NextResponse.json(
+                        { error: "Không tìm thấy chương hợp lệ từ TOC. Bạn có thể thử chế độ Regex." },
+                        { status: 400 }
+                    )
+                }
+            }
 
-                resolve({ metadata, chapters })
+            const gapFilled = withMissingChapterPlaceholders(chapters)
+
+            parsedData = {
+                metadata,
+                sections,
+                chapters: gapFilled.chapters,
+                cover,
+                parserInfo: {
+                    splitMode,
+                    chapterRegexUsed: regexNormalized,
+                    regexPreset,
+                    sourceSections: sections.length,
+                    chaptersDetected: chapters.length,
+                    chaptersFinal: gapFilled.chapters.length,
+                    insertedMissingChapters: gapFilled.insertedCount,
+                    detectedMaxChapterNumber: gapFilled.detectedMax,
+                    detectedNumberAssignments: gapFilled.detectedNumberAssignments,
+                }
+            }
+        } finally {
+            // Xóa file tạm
+            await fs.unlink(tempFilePath).catch(() => { })
+        }
+
+        const { metadata, chapters, parserInfo, cover } = parsedData
+
+        const metadataTitle = normalizeMetaText(metadata?.title, "Truyện chưa đặt tên")
+        const metadataAuthor = normalizeMetaText(metadata?.creator, "Khuyết danh")
+        const metadataDescRaw = normalizeMetaText(metadata?.description, "Chưa có giới thiệu")
+        const metadataDesc = convert(metadataDescRaw, { wordwrap: false })
+
+        const novelTitle = normalizeMetaText(readFormText(formData, "title"), metadataTitle)
+        const novelAuthor = normalizeMetaText(readFormText(formData, "authorName"), metadataAuthor)
+        const novelDesc = normalizeMetaText(readFormText(formData, "description"), metadataDesc)
+
+        const hasDetectedVolumes = chapters.some((ch: any) => ch.volumeNumber !== null)
+
+        if (previewOnly) {
+            return NextResponse.json({
+                preview: true,
+                fileName: epubFile.name,
+                splitMode,
+                detectedStructureType: hasDetectedVolumes ? "light_novel" : "standard",
+                parserInfo,
+                hasCoverFromEpub: !!cover?.buffer,
+                novel: {
+                    title: novelTitle,
+                    authorName: novelAuthor,
+                    description: novelDesc,
+                    totalChapters: chapters.length,
+                },
+                chaptersPreview: chapters.slice(0, 20).map((ch: any, i: number) => ({
+                    number: ch.finalNumber || i + 1,
+                    title: ch.title,
+                    isPlaceholder: !!ch.isPlaceholder,
+                    volumeNumber: ch.volumeNumber,
+                    volumeTitle: ch.volumeTitle,
+                    volumeChapterNumber: ch.volumeChapterNumber,
+                    excerpt: (ch.content || "").slice(0, 180),
+                })),
             })
+        }
 
-            epub.parse()
+        const selectedSeriesId = await resolveSeriesIdForEpubImport({
+            mode: seriesMode,
+            seriesId: seriesIdInput,
+            seriesName: seriesNameInput,
+            userRole: session.user.role,
+            userId: session.user.id,
         })
-
-        // Xóa file tạm
-        await fs.unlink(tempFilePath).catch(() => { })
-
-        const { metadata, chapters } = parsedData
-
-        let novelTitle = metadata.title || "Truyện chưa đặt tên"
-        let novelAuthor = metadata.creator || "Khuyết danh"
-        let novelDesc = metadata.description || "Chưa có giới thiệu"
 
         // Generate base slug
         const baseSlug = slugify(novelTitle)
@@ -83,12 +740,16 @@ export async function POST(req: Request) {
             slugCounter++
         }
 
+        const coverUrl = await saveCoverBufferToR2(cover)
+
         const newNovel = await prisma.novel.create({
             data: {
                 title: novelTitle,
                 slug: slug,
                 authorName: novelAuthor,
-                description: convert(novelDesc, { wordwrap: false }), // metadata metadata có thể chứa html
+                description: novelDesc,
+                coverUrl,
+                seriesId: selectedSeriesId,
                 uploaderId: session.user.id,
                 totalChapters: chapters.length,
             },
@@ -98,7 +759,10 @@ export async function POST(req: Request) {
         await connectToMongoDB()
         const chapterDocs = chapters.map((ch: any, i: number) => ({
             novelId: newNovel.id,
-            number: i + 1,
+            number: ch.finalNumber || (i + 1),
+            volumeNumber: ch.volumeNumber ?? null,
+            volumeTitle: ch.volumeTitle ?? null,
+            volumeChapterNumber: ch.volumeChapterNumber ?? null,
             title: ch.title,
             content: ch.content,
             views: 0
@@ -108,7 +772,11 @@ export async function POST(req: Request) {
             await Chapter.insertMany(chapterDocs)
         }
 
-        return NextResponse.json(newNovel, { status: 201 })
+        return NextResponse.json({
+            ...newNovel,
+            parserInfo,
+            hasCoverFromEpub: !!coverUrl,
+        }, { status: 201 })
     } catch (error: any) {
         console.error("EPUB upload error:", error)
         return NextResponse.json({ error: "Lỗi xử lý file EPUB", details: error.message }, { status: 500 })

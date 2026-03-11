@@ -5,6 +5,12 @@ import connectToMongoDB from "@/lib/mongoose"
 import { Chapter } from "@/lib/models/chapter"
 import { prisma } from "@/lib/prisma"
 
+function toNullableNumber(value: any): number | null {
+    if (value === null || value === undefined || value === "") return null
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+}
+
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const novelId = searchParams.get("novelId")
@@ -48,7 +54,7 @@ export async function POST(req: Request) {
 
     try {
         const data = await req.json()
-        const { novelId, number, title, content } = data
+        const { novelId, number, title, content, volumeNumber, volumeTitle, volumeChapterNumber } = data
 
         // Xác minh truyện thuộc về Mod này
         const novel = await prisma.novel.findFirst({
@@ -70,6 +76,9 @@ export async function POST(req: Request) {
         const newChapter = await Chapter.create({
             novelId,
             number,
+            volumeNumber: toNullableNumber(volumeNumber),
+            volumeTitle: typeof volumeTitle === "string" && volumeTitle.trim().length > 0 ? volumeTitle.trim() : null,
+            volumeChapterNumber: toNullableNumber(volumeChapterNumber),
             title,
             content,
         })
@@ -96,7 +105,7 @@ export async function PUT(req: Request) {
 
     try {
         const data = await req.json()
-        const { id, novelId, number, title, content } = data
+        const { id, novelId, number, title, content, volumeNumber, volumeTitle, volumeChapterNumber } = data
 
         // Xác minh truyện thuộc về Mod này
         const novel = await prisma.novel.findFirst({
@@ -111,7 +120,14 @@ export async function PUT(req: Request) {
 
         const updatedChapter = await Chapter.findOneAndUpdate(
             { _id: id, novelId },
-            { number, title, content },
+            {
+                number,
+                title,
+                content,
+                volumeNumber: toNullableNumber(volumeNumber),
+                volumeTitle: typeof volumeTitle === "string" && volumeTitle.trim().length > 0 ? volumeTitle.trim() : null,
+                volumeChapterNumber: toNullableNumber(volumeChapterNumber),
+            },
             { new: true }
         )
 

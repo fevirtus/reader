@@ -44,6 +44,13 @@ NEXTAUTH_URL="http://localhost:3000"
 # Cấu hình Google Login
 GOOGLE_CLIENT_ID="your_google_client_id"
 GOOGLE_CLIENT_SECRET="your_google_client_secret"
+
+# Cloudflare R2 (lưu ảnh bìa)
+R2_ACCOUNT_ID="your_cloudflare_account_id"
+R2_ACCESS_KEY_ID="your_r2_access_key_id"
+R2_SECRET_ACCESS_KEY="your_r2_secret_access_key"
+R2_BUCKET_NAME="your_r2_bucket_name"
+R2_PUBLIC_BASE_URL="https://your-public-r2-domain"
 ```
 
 ### 3. Cài đặt dependencies và khởi tạo DB

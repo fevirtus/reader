@@ -11,6 +11,11 @@ export interface Novel {
   title: string
   slug: string
   authorName: string
+  series?: {
+    id: string
+    name: string
+    slug: string
+  } | null
   coverColor: string
   description: string
   genres: string[]
@@ -28,6 +33,9 @@ export interface Chapter {
   id: string
   novelId: string
   number: number
+  volumeNumber?: number
+  volumeTitle?: string
+  volumeChapterNumber?: number
   title: string
   content: string
   views: number

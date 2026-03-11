@@ -62,9 +62,11 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
 
   // Extract paragraphs for TTS
   const paragraphs = chapter.content.split("\n").map((p: string) => p.trim()).filter(Boolean)
+  const chapterLabel = (chapter as any).volumeChapterNumber ? `Chương ${(chapter as any).volumeChapterNumber}` : `Chương ${chapter.number}`
+  const volumeLabel = (chapter as any).volumeTitle || ((chapter as any).volumeNumber ? `Quyển ${(chapter as any).volumeNumber}` : null)
 
   return (
-    <div className="mx-auto max-w-4xl lg:max-w-screen-lg px-4 py-6 md:px-8">
+    <div className="mx-auto max-w-4xl px-3 py-4 md:px-8 md:py-6 lg:max-w-screen-lg">
       {/* Top navigation */}
       <div className="mb-6 flex flex-col gap-3">
         <Link href={`/truyen/${slug}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -73,20 +75,26 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
 
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-lg font-bold text-foreground md:text-xl lg:text-2xl">
-            Chương {chapter.number}: {chapter.title}
+            {volumeLabel ? `${volumeLabel} - ` : ""}{chapterLabel}: {chapter.title}
           </h1>
         </div>
       </div>
 
       {/* Chapter navigation top */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-2">
         <Button variant="outline" size="sm" disabled={!hasPrev} asChild={hasPrev}>
           {hasPrev ? (
             <Link href={`/truyen/${slug}/${chapterNumber - 1}`}>
-              <ChevronLeft className="mr-1 h-4 w-4" /> Ch. trước
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              <span className="hidden sm:inline">Ch. trước</span>
+              <span className="sm:hidden">Trước</span>
             </Link>
           ) : (
-            <span><ChevronLeft className="mr-1 h-4 w-4" /> Ch. trước</span>
+            <span>
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              <span className="hidden sm:inline">Ch. trước</span>
+              <span className="sm:hidden">Trước</span>
+            </span>
           )}
         </Button>
         <Button variant="outline" size="sm" asChild>
@@ -97,16 +105,22 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
         <Button variant="outline" size="sm" disabled={!hasNext} asChild={hasNext}>
           {hasNext ? (
             <Link href={`/truyen/${slug}/${chapterNumber + 1}`}>
-              Ch. sau <ChevronRight className="ml-1 h-4 w-4" />
+              <span className="hidden sm:inline">Ch. sau</span>
+              <span className="sm:hidden">Sau</span>
+              <ChevronRight className="ml-1 h-4 w-4" />
             </Link>
           ) : (
-            <span>Ch. sau <ChevronRight className="ml-1 h-4 w-4" /></span>
+            <span>
+              <span className="hidden sm:inline">Ch. sau</span>
+              <span className="sm:hidden">Sau</span>
+              <ChevronRight className="ml-1 h-4 w-4" />
+            </span>
           )}
         </Button>
       </div>
 
       {/* Chapter content */}
-      <article className="chapter-content mb-8 rounded-lg border border-border bg-card p-6 font-serif text-foreground/90 md:p-8 lg:p-12 text-justify">
+      <article className="chapter-content mb-8 rounded-lg border border-border bg-card p-4 font-serif text-foreground/90 text-justify md:p-8 lg:p-12">
         {paragraphs.map((text: string, idx: number) => (
           <p key={idx} data-p-index={idx} className="mb-4 last:mb-0">
             {text}
@@ -115,23 +129,35 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
       </article>
 
       {/* Chapter navigation bottom */}
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-8 flex items-center justify-between gap-2">
         <Button variant="outline" size="sm" disabled={!hasPrev} asChild={hasPrev}>
           {hasPrev ? (
             <Link href={`/truyen/${slug}/${chapterNumber - 1}`}>
-              <ChevronLeft className="mr-1 h-4 w-4" /> Chương trước
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              <span className="hidden sm:inline">Chương trước</span>
+              <span className="sm:hidden">Trước</span>
             </Link>
           ) : (
-            <span><ChevronLeft className="mr-1 h-4 w-4" /> Chương trước</span>
+            <span>
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              <span className="hidden sm:inline">Chương trước</span>
+              <span className="sm:hidden">Trước</span>
+            </span>
           )}
         </Button>
         <Button variant="outline" size="sm" disabled={!hasNext} asChild={hasNext}>
           {hasNext ? (
             <Link href={`/truyen/${slug}/${chapterNumber + 1}`}>
-              Chương sau <ChevronRight className="ml-1 h-4 w-4" />
+              <span className="hidden sm:inline">Chương sau</span>
+              <span className="sm:hidden">Sau</span>
+              <ChevronRight className="ml-1 h-4 w-4" />
             </Link>
           ) : (
-            <span>Chương sau <ChevronRight className="ml-1 h-4 w-4" /></span>
+            <span>
+              <span className="hidden sm:inline">Chương sau</span>
+              <span className="sm:hidden">Sau</span>
+              <ChevronRight className="ml-1 h-4 w-4" />
+            </span>
           )}
         </Button>
       </div>
@@ -151,7 +177,7 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
         paragraphs={paragraphs}
         currentChapter={chapterNumber}
         maxChapter={maxChapter}
-        chapterTitle={`Chương ${chapter.number}: ${chapter.title}`}
+        chapterTitle={`${volumeLabel ? `${volumeLabel} - ` : ""}${chapterLabel}: ${chapter.title}`}
       />
     </div>
   )

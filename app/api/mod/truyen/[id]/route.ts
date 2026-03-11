@@ -14,12 +14,18 @@ export async function GET(
     }
 
     try {
-        const novel = await prisma.novel.findUnique({
-            where: {
-                id,
-                uploaderId: session.user.id,
-            },
+        const novel = await prisma.novel.findFirst({
+            where: session.user.role === "ADMIN"
+                ? { id }
+                : {
+                    id,
+                    OR: [
+                        { uploaderId: session.user.id },
+                        { uploaderId: null },
+                    ],
+                },
             include: {
+                series: true,
                 genres: {
                     include: {
                         genre: true

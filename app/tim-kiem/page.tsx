@@ -1,11 +1,28 @@
 // Server component instead of client component
 import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { NovelCard } from "@/components/novel-card"
 import { prisma } from "@/lib/prisma"
 
 export const dynamic = "force-dynamic"
+
+function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(rows: T[]): T[] {
+  const pickedSeries = new Set<string>()
+  const output: T[] = []
+
+  for (const row of rows) {
+    if (!row.seriesId) {
+      output.push(row)
+      continue
+    }
+
+    if (pickedSeries.has(row.seriesId)) continue
+    pickedSeries.add(row.seriesId)
+    output.push(row)
+  }
+
+  return output
+}
 
 export default async function SearchPage({
   searchParams,
@@ -25,6 +42,7 @@ export default async function SearchPage({
     where.OR = [
       { title: { contains: q, mode: "insensitive" } },
       { authorName: { contains: q, mode: "insensitive" } },
+      { series: { name: { contains: q, mode: "insensitive" } } },
     ]
   }
 
@@ -59,11 +77,22 @@ export default async function SearchPage({
       orderBy = { updatedAt: "desc" }
   }
 
-  const filteredNovels = await prisma.novel.findMany({
+  const filteredNovelsRaw = await prisma.novel.findMany({
     where,
     orderBy,
-    take: 20,
+    include: {
+      series: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+        },
+      },
+    },
+    take: 80,
   })
+
+  const filteredNovels = q ? filteredNovelsRaw.slice(0, 20) : collapseSeriesRows(filteredNovelsRaw).slice(0, 20)
 
   const genres = await prisma.genre.findMany()
 

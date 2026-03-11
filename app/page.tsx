@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { ArrowRight, BookOpen, Sparkles, Flame, Heart, Swords, Building2, Rocket, Crown, Laugh, Search, Shield } from "lucide-react"
 import { NovelCard } from "@/components/novel-card"
+import { getNovelStatusBadgeClass } from "@/lib/novel-status"
 
 import { prisma } from "@/lib/prisma"
 
@@ -19,6 +20,24 @@ const iconMap: Record<string, React.ReactNode> = {
 
 export const dynamic = "force-dynamic"
 
+function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(rows: T[]): T[] {
+  const pickedSeries = new Set<string>()
+  const output: T[] = []
+
+  for (const row of rows) {
+    if (!row.seriesId) {
+      output.push(row)
+      continue
+    }
+
+    if (pickedSeries.has(row.seriesId)) continue
+    pickedSeries.add(row.seriesId)
+    output.push(row)
+  }
+
+  return output
+}
+
 export default async function HomePage() {
   let popularNovels: any[] = []
   let latestNovels: any[] = []
@@ -28,19 +47,60 @@ export default async function HomePage() {
 
   try {
     popularNovels = await prisma.novel.findMany({
-      take: 20,
+      take: 100,
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        authorName: true,
+        coverColor: true,
+        coverUrl: true,
+        rating: true,
+        views: true,
+        totalChapters: true,
+        status: true,
+        description: true,
+        seriesId: true,
+      },
       orderBy: { views: "desc" },
     })
+    popularNovels = collapseSeriesRows(popularNovels).slice(0, 20)
 
     latestNovels = await prisma.novel.findMany({
-      take: 20,
+      take: 100,
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        authorName: true,
+        coverColor: true,
+        coverUrl: true,
+        rating: true,
+        views: true,
+        totalChapters: true,
+        status: true,
+        description: true,
+        seriesId: true,
+      },
       orderBy: { updatedAt: "desc" },
     })
+    latestNovels = collapseSeriesRows(latestNovels).slice(0, 20)
 
     topRated = await prisma.novel.findMany({
-      take: 4,
+      take: 20,
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        authorName: true,
+        coverUrl: true,
+        rating: true,
+        totalChapters: true,
+        seriesId: true,
+      },
       orderBy: { rating: "desc" },
     })
+    topRated = collapseSeriesRows(topRated).slice(0, 4)
 
     genres = await prisma.genre.findMany({
       take: 8,
@@ -60,7 +120,7 @@ export default async function HomePage() {
             href={`/truyen/${featured.slug}`}
             className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card md:flex-row"
           >
-            <img src={featured.coverUrl || "/default-cover.svg"} alt={featured.title} className="h-48 w-full object-cover md:h-auto md:w-72" />
+            <img src={featured.coverUrl || "/default-cover.svg"} alt={featured.title} className="h-48 w-full bg-muted object-contain md:h-auto md:w-72" />
             <div className="flex flex-1 flex-col justify-center gap-3 p-6">
               <span className="text-xs font-semibold uppercase tracking-wider text-primary">Truyện Nổi Bật</span>
               <h1 title={featured.title} className="text-2xl font-bold text-foreground group-hover:text-primary transition-colors text-balance md:text-3xl">
@@ -72,7 +132,9 @@ export default async function HomePage() {
               </p>
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 <span>{featured.totalChapters} chương</span>
-                <span>{featured.status}</span>
+                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getNovelStatusBadgeClass(featured.status)}`}>
+                  {featured.status}
+                </span>
                 <span className="flex items-center gap-1 text-primary">
                   <Sparkles className="h-3.5 w-3.5" />
                   {featured.rating}
@@ -128,7 +190,7 @@ export default async function HomePage() {
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
                   {idx + 1}
                 </span>
-                <img src={novel.coverUrl || "/default-cover.svg"} alt={novel.title} className="h-12 w-9 shrink-0 rounded object-cover" />
+                <img src={novel.coverUrl || "/default-cover.svg"} alt={novel.title} className="h-12 w-9 shrink-0 rounded bg-muted object-contain" />
                 <div className="min-w-0 flex-1">
                   <h3 title={novel.title} className="truncate text-sm font-semibold text-foreground group-hover:text-primary transition-colors">{novel.title}</h3>
                   <p className="text-xs text-muted-foreground">{novel.authorName} - Ch. {novel.totalChapters}</p>

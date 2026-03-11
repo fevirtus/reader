@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
-import { writeFile } from "fs/promises"
-import path from "path"
-import fs from "fs"
+import { uploadBufferToR2 } from "@/lib/r2"
 
 export async function POST(req: Request) {
   try {
@@ -26,21 +24,14 @@ export async function POST(req: Request) {
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9)
-    const ext = path.extname(file.name) || ".jpg"
-    const filename = `cover-${uniqueSuffix}${ext}`
+    const url = await uploadBufferToR2({
+      buffer,
+      contentType: file.type,
+      keyPrefix: "covers/manual",
+      fileNameHint: file.name,
+    })
 
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "covers")
-
-    // Ensure directory exists
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true })
-    }
-
-    const filepath = path.join(uploadDir, filename)
-    await writeFile(filepath, buffer)
-
-    return NextResponse.json({ url: `/uploads/covers/${filename}` })
+    return NextResponse.json({ url })
   } catch (error: any) {
     console.error("Cover upload error:", error)
     return NextResponse.json({ error: error.message || "Failed to upload cover" }, { status: 500 })

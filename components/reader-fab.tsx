@@ -1,11 +1,10 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { List, Settings2, Headphones, X, Settings, Menu, ArrowUp } from "lucide-react"
+import { Settings2, Headphones, X, Menu, ArrowUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import Link from "next/link"
 import { ReadingSettingsContent } from "./reading-settings"
 import { TTSPlayer } from "./tts-player"
 import { ReaderTOC } from "./reader-toc"
@@ -25,14 +24,41 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
   const [isTTSOpen, setIsTTSOpen] = useState(false)
   const [isTTSExpanded, setIsTTSExpanded] = useState(false)
   const [showScrollTop, setShowScrollTop] = useState(false)
+  const [isMobileControlsVisible, setIsMobileControlsVisible] = useState(true)
 
   useEffect(() => {
+    let lastScrollY = window.scrollY
+
     const handleScroll = () => {
-      setShowScrollTop(window.scrollY > 400)
+      const currentY = window.scrollY
+      setShowScrollTop(currentY > 400)
+
+      const isMobile = window.innerWidth < 768
+      if (!isMobile) {
+        setIsMobileControlsVisible(true)
+        lastScrollY = currentY
+        return
+      }
+
+      const delta = currentY - lastScrollY
+      if (Math.abs(delta) < 12) {
+        return
+      }
+
+      if (currentY < 120) {
+        setIsMobileControlsVisible(true)
+      } else if (delta > 0 && !isOpen && !isTTSOpen) {
+        setIsMobileControlsVisible(false)
+      } else if (delta < 0) {
+        setIsMobileControlsVisible(true)
+      }
+
+      lastScrollY = currentY
     }
+
     window.addEventListener("scroll", handleScroll, { passive: true })
     return () => window.removeEventListener("scroll", handleScroll)
-  }, [])
+  }, [isOpen, isTTSOpen])
 
   const handleScrollToTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" })
@@ -46,16 +72,17 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
   return (
     <>
       <div className={cn(
-        "fixed right-6 z-50 flex flex-col items-center gap-3 transition-all duration-300",
-        isTTSOpen ? (isTTSExpanded ? "bottom-[12rem]" : "bottom-24") : "bottom-6"
+        "fixed right-3 z-50 flex flex-col items-center gap-2.5 transition-all duration-300 md:right-6 md:gap-3",
+        isTTSOpen ? (isTTSExpanded ? "bottom-[10.5rem] md:bottom-[12rem]" : "bottom-[4.75rem] md:bottom-24") : "bottom-3 md:bottom-6",
+        isMobileControlsVisible ? "max-md:translate-y-0 max-md:opacity-100" : "max-md:translate-y-20 max-md:opacity-0 max-md:pointer-events-none"
       )}>
       {/* Main FAB Toggle (Mobile mostly, but works as container) */}
       <Button
         size="icon"
-        className="h-14 w-14 rounded-full shadow-lg md:hidden"
+        className="h-11 w-11 rounded-full shadow-lg md:hidden"
         onClick={() => setIsOpen(!isOpen)}
       >
-        {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+        {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
       </Button>
 
       {/* Action Items */}
@@ -69,14 +96,14 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
         <Button
           variant={isTTSOpen ? "default" : "secondary"}
           size="icon"
-          className="h-12 w-12 rounded-full shadow-md relative group"
+          className="h-10 w-10 rounded-full shadow-md relative group md:h-12 md:w-12"
           onClick={() => {
             setIsTTSOpen(!isTTSOpen)
             setIsOpen(false)
           }}
         >
-          <Headphones className="h-5 w-5" />
-          <span className="absolute right-full mr-3 whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100">
+          <Headphones className="h-4 w-4 md:h-5 md:w-5" />
+          <span className="absolute right-full mr-3 hidden whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100 md:inline">
             {isTTSOpen ? "Đóng Audio" : "Nghe Audio"}
           </span>
         </Button>
@@ -94,15 +121,15 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
             <Button
               variant="secondary"
               size="icon"
-              className="h-12 w-12 rounded-full shadow-md relative group"
+              className="h-10 w-10 rounded-full shadow-md relative group md:h-12 md:w-12"
             >
-              <Settings2 className="h-5 w-5" />
-              <span className="absolute right-full mr-3 whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100">
+              <Settings2 className="h-4 w-4 md:h-5 md:w-5" />
+              <span className="absolute right-full mr-3 hidden whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100 md:inline">
                 Tùy chỉnh
               </span>
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-64 mb-2 mr-4 flex" align="end" side="left">
+          <PopoverContent className="mb-2 mr-2 flex w-64 md:mr-4" align="end" side="left">
             <ReadingSettingsContent 
               fontSize={fontSize} setFontSize={setFontSize}
               lineHeight={lineHeight} setLineHeight={setLineHeight}
@@ -116,13 +143,13 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
           variant="secondary"
           size="icon"
           className={cn(
-            "h-12 w-12 rounded-full shadow-md relative group transition-all duration-300",
+            "h-10 w-10 rounded-full shadow-md relative group transition-all duration-300 md:h-12 md:w-12",
             showScrollTop ? "opacity-100 scale-100" : "opacity-0 scale-0 pointer-events-none"
           )}
           onClick={handleScrollToTop}
         >
-          <ArrowUp className="h-5 w-5" />
-          <span className="absolute right-full mr-3 whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100">
+          <ArrowUp className="h-4 w-4 md:h-5 md:w-5" />
+          <span className="absolute right-full mr-3 hidden whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100 md:inline">
             Lên đầu trang
           </span>
         </Button>

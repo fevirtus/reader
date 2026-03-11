@@ -22,7 +22,7 @@ export async function GET(
         .sort({ number: 1 })
         .skip(skip)
         .limit(limit)
-        .select("number title createdAt") // don't return content
+        .select("number title createdAt volumeNumber volumeTitle volumeChapterNumber") // don't return content
         .lean(),
       Chapter.countDocuments({ novelId })
     ])
@@ -32,6 +32,9 @@ export async function GET(
         id: c._id.toString(),
         number: c.number,
         title: c.title,
+        volumeNumber: (c as any).volumeNumber ?? null,
+        volumeTitle: (c as any).volumeTitle ?? null,
+        volumeChapterNumber: (c as any).volumeChapterNumber ?? null,
         createdAt: (c.createdAt as Date).toISOString()
       })),
       totalChapters,

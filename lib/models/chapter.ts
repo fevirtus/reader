@@ -3,6 +3,9 @@ import mongoose, { Schema, Document } from "mongoose"
 export interface IChapter extends Document {
     novelId: string // Trỏ tới ID trong PostgreSQL
     number: number
+    volumeNumber?: number
+    volumeTitle?: string
+    volumeChapterNumber?: number
     title: string
     content: string
     views: number
@@ -12,6 +15,9 @@ export interface IChapter extends Document {
 const ChapterSchema: Schema = new Schema({
     novelId: { type: String, required: true, index: true },
     number: { type: Number, required: true },
+    volumeNumber: { type: Number, default: null },
+    volumeTitle: { type: String, default: null },
+    volumeChapterNumber: { type: Number, default: null },
     title: { type: String, required: true },
     content: { type: String, required: true },
     views: { type: Number, default: 0 },

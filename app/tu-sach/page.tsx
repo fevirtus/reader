@@ -5,6 +5,7 @@ import { BookOpen, BookMarked, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
 import { useBookmarks } from "@/lib/bookmark-context"
+import { getNovelStatusBadgeClass } from "@/lib/novel-status"
 
 
 export default function BookshelfPage() {
@@ -55,13 +56,18 @@ export default function BookshelfPage() {
                 className="flex items-center gap-4 rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/20"
               >
                 <Link href={`/truyen/${novel.slug}`}>
-                  <img src={novel.coverUrl || "/default-cover.svg"} alt={novel.title} className="h-16 w-12 shrink-0 rounded-md object-cover hover:opacity-90" />
+                  <img src={novel.coverUrl || "/default-cover.svg"} alt={novel.title} className="h-16 w-12 shrink-0 rounded-md bg-muted object-contain hover:opacity-90" />
                 </Link>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <Link title={novel.title} href={`/truyen/${novel.slug}`} className="truncate text-sm font-semibold text-foreground hover:text-primary transition-colors">
                     {novel.title}
                   </Link>
                   <p className="text-xs text-muted-foreground">{novel.authorName}</p>
+                  <div>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${getNovelStatusBadgeClass(novel.status)}`}>
+                      {novel.status}
+                    </span>
+                  </div>
                   {bookmark.lastChapterNumber && (
                     <p className="text-xs text-muted-foreground">
                       Đang đọc: Chương {bookmark.lastChapterNumber} / {novel.totalChapters}

@@ -2,8 +2,8 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { useState } from "react"
-import { BookOpen, Menu, X, Search, User as UserIcon, LogOut, BookMarked, Shield } from "lucide-react"
+import { useEffect, useState } from "react"
+import { BookOpen, Menu, Search, LogOut, BookMarked, Shield } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet"
@@ -17,18 +17,76 @@ const navLinks = [
   { label: "Danh Sách", href: "/tim-kiem" },
 ]
 
+type SearchSuggestion = {
+  id: string
+  title: string
+  slug: string
+  authorName: string
+  coverUrl?: string | null
+  series?: { id: string; name: string } | null
+}
+
+function roleLabel(role?: "USER" | "MOD" | "ADMIN") {
+  if (role === "ADMIN") return "Quản trị viên"
+  if (role === "MOD") return "Kiểm duyệt viên"
+  return "Thành viên"
+}
+
 export function Header() {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuth()
   const [searchQuery, setSearchQuery] = useState("")
+  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([])
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
   const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const query = searchQuery.trim()
+    if (query.length < 2) {
+      setSuggestions([])
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/truyen/suggest?q=${encodeURIComponent(query)}`, {
+          signal: controller.signal,
+        })
+
+        if (!res.ok) {
+          setSuggestions([])
+          return
+        }
+
+        const data = await res.json()
+        setSuggestions(Array.isArray(data) ? data : [])
+      } catch {
+        setSuggestions([])
+      }
+    }, 250)
+
+    return () => {
+      controller.abort()
+      clearTimeout(timeoutId)
+    }
+  }, [searchQuery])
+
+  const goToSuggestion = (slug: string) => {
+    router.push(`/truyen/${slug}`)
+    setSearchQuery("")
+    setSuggestions([])
+    setIsSearchFocused(false)
+  }
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (searchQuery.trim()) {
       router.push(`/tim-kiem?q=${encodeURIComponent(searchQuery.trim())}`)
       setSearchQuery("")
+      setSuggestions([])
+      setIsSearchFocused(false)
     }
   }
 
@@ -68,7 +126,41 @@ export function Header() {
               className="h-9 pl-8"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setTimeout(() => setIsSearchFocused(false), 120)}
             />
+
+            {isSearchFocused && searchQuery.trim().length >= 2 && (
+              <div className="absolute top-[calc(100%+6px)] z-50 w-full overflow-hidden rounded-md border border-border bg-popover shadow-lg">
+                {suggestions.length > 0 ? (
+                  suggestions.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => goToSuggestion(item.slug)}
+                      className="flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-muted/40"
+                    >
+                      <img
+                        src={item.coverUrl || "/default-cover.svg"}
+                        alt={item.title}
+                        className="h-12 w-9 rounded-sm bg-muted object-contain"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
+                        <p className="truncate text-xs text-muted-foreground">{item.authorName}</p>
+                      </div>
+                      {item.series?.name && (
+                        <span className="max-w-[120px] truncate text-[11px] font-medium text-primary">
+                          {item.series.name}
+                        </span>
+                      )}
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">Không tìm thấy kết quả phù hợp.</div>
+                )}
+              </div>
+            )}
           </div>
         </form>
 
@@ -93,6 +185,7 @@ export function Header() {
                 <div className="px-2 py-1.5">
                   <p className="text-sm font-medium text-foreground">{user.username}</p>
                   <p className="text-xs text-muted-foreground">{user.email}</p>
+                  <p className="text-xs text-primary">Loại tài khoản: {roleLabel(user.role)}</p>
                 </div>
                 <DropdownMenuSeparator />
                 {(user.role === "MOD" || user.role === "ADMIN") && (
@@ -208,6 +301,7 @@ export function Header() {
                       <div>
                         <p className="text-sm font-medium text-foreground">{user.username}</p>
                         <p className="text-xs text-muted-foreground">{user.email}</p>
+                        <p className="text-xs text-primary">Loại tài khoản: {roleLabel(user.role)}</p>
                       </div>
                     </div>
                     <Button variant="ghost" size="sm" className="w-full justify-start text-destructive" onClick={() => { logout(); setOpen(false) }}>

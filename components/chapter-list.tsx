@@ -8,6 +8,9 @@ interface ChapterListProps {
     id: string
     novelId: string
     number: number
+    volumeNumber?: number | null
+    volumeTitle?: string | null
+    volumeChapterNumber?: number | null
     title: string
     createdAt: string
     views: number
@@ -31,28 +34,64 @@ const generatePagination = (currentPage: number, totalPages: number) => {
   return [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages]
 }
 
+const generateMobilePagination = (currentPage: number, totalPages: number) => {
+  if (totalPages <= 3) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1)
+  }
+
+  if (currentPage <= 1) {
+    return [1, 2, '...']
+  }
+
+  if (currentPage >= totalPages) {
+    return ['...', totalPages - 1, totalPages]
+  }
+
+  return [currentPage - 1, currentPage, currentPage + 1]
+}
+
 export function ChapterList({ chapters, novelSlug, currentPage, totalPages, totalChapters }: ChapterListProps) {
+  let lastVolumeKey: string | null = null
+
   return (
     <div className="flex flex-col">
-      {chapters.map((chapter) => (
-        <Link
-          key={chapter.id}
-          href={`/truyen/${novelSlug}/${chapter.number}`}
-          className="flex items-center justify-between border-b border-border px-2 py-3 text-sm transition-colors hover:bg-muted/50 last:border-0"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="shrink-0 font-medium text-muted-foreground">Ch. {chapter.number}</span>
-            <span className="truncate text-foreground">{chapter.title}</span>
+      {chapters.map((chapter) => {
+        const currentVolumeKey = chapter.volumeNumber || chapter.volumeTitle
+          ? `${chapter.volumeNumber ?? "no-num"}-${chapter.volumeTitle ?? "no-title"}`
+          : null
+        const showVolumeHeader = currentVolumeKey !== null && currentVolumeKey !== lastVolumeKey
+        if (currentVolumeKey !== null) {
+          lastVolumeKey = currentVolumeKey
+        }
+
+        return (
+          <div key={chapter.id}>
+            {showVolumeHeader && (
+              <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-primary">
+                {chapter.volumeTitle || `Quyển ${chapter.volumeNumber}`}
+              </div>
+            )}
+            <Link
+              href={`/truyen/${novelSlug}/${chapter.number}`}
+              className="flex items-center justify-between border-b border-border px-2 py-3 text-sm transition-colors hover:bg-muted/50 last:border-0"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="shrink-0 font-medium text-muted-foreground">
+                  {chapter.volumeChapterNumber ? `Ch. ${chapter.volumeChapterNumber}` : `Ch. ${chapter.number}`}
+                </span>
+                <span className="truncate text-foreground">{chapter.title}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                <span className="hidden items-center gap-1 sm:flex">
+                  <Eye className="h-3 w-3" />
+                  {formatViews(chapter.views)}
+                </span>
+                <span>{chapter.createdAt}</span>
+              </div>
+            </Link>
           </div>
-          <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
-            <span className="hidden items-center gap-1 sm:flex">
-              <Eye className="h-3 w-3" />
-              {formatViews(chapter.views)}
-            </span>
-            <span>{chapter.createdAt}</span>
-          </div>
-        </Link>
-      ))}
+        )
+      })}
 
       {totalPages > 1 && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border p-4 bg-muted/10">
@@ -67,6 +106,23 @@ export function ChapterList({ chapters, novelSlug, currentPage, totalPages, tota
             >
               Trước
             </Link>
+
+            <div className="flex items-center gap-1 sm:hidden">
+              {generateMobilePagination(currentPage, totalPages).map((p, i) => (
+                <div key={`mobile-${i}`}>
+                  {p === '...' ? (
+                    <span className="px-2 text-muted-foreground">...</span>
+                  ) : (
+                    <Link
+                      href={`/truyen/${novelSlug}?page=${p}`}
+                      className={`inline-flex h-9 w-9 items-center justify-center whitespace-nowrap rounded-md border text-sm font-medium shadow-sm transition-colors ${currentPage === p ? 'bg-primary text-primary-foreground border-primary hover:bg-primary/90' : 'bg-background border-input hover:bg-accent hover:text-accent-foreground'}`}
+                    >
+                      {p}
+                    </Link>
+                  )}
+                </div>
+              ))}
+            </div>
 
             {generatePagination(currentPage, totalPages).map((p, i) => (
               <div key={i} className="hidden sm:block">

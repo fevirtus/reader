@@ -16,6 +16,9 @@ interface TOCChapter {
   id: string
   number: number
   title: string
+  volumeNumber?: number | null
+  volumeTitle?: string | null
+  volumeChapterNumber?: number | null
 }
 
 export function ReaderTOC({ novelId, novelSlug, currentChapterNumber }: ReaderTOCProps) {
@@ -76,10 +79,10 @@ export function ReaderTOC({ novelId, novelSlug, currentChapterNumber }: ReaderTO
         <Button
           variant="secondary"
           size="icon"
-          className="h-12 w-12 rounded-full shadow-md relative group"
+          className="relative h-10 w-10 rounded-full shadow-md group md:h-12 md:w-12"
         >
-          <List className="h-5 w-5" />
-          <span className="absolute right-full mr-3 whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100">
+          <List className="h-4 w-4 md:h-5 md:w-5" />
+          <span className="absolute right-full mr-3 hidden whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100 md:inline">
             Mục lục
           </span>
         </Button>
@@ -97,27 +100,44 @@ export function ReaderTOC({ novelId, novelSlug, currentChapterNumber }: ReaderTO
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : (
-            chapters.map((chap) => {
+            (() => {
+              let lastVolumeKey: string | null = null
+              return chapters.map((chap) => {
               const isActive = chap.number === currentChapterNumber
+              const volumeKey = chap.volumeNumber || chap.volumeTitle
+                ? `${chap.volumeNumber ?? "no-num"}-${chap.volumeTitle ?? "no-title"}`
+                : null
+              const showVolumeHeader = volumeKey !== null && volumeKey !== lastVolumeKey
+              if (volumeKey !== null) {
+                lastVolumeKey = volumeKey
+              }
+
               return (
-                <Link
-                  key={chap.id}
-                  id={`toc-chap-${chap.number}`}
-                  href={`/truyen/${novelSlug}/${chap.number}`}
-                  onClick={() => setIsOpen(false)}
-                  className={`block px-3 py-2 text-sm rounded-md transition-colors ${
-                    isActive 
-                      ? 'bg-primary text-primary-foreground font-medium' 
-                      : 'hover:bg-muted text-foreground/80'
-                  }`}
-                >
-                  <span className={isActive ? "text-primary-foreground/90 font-bold mr-2 lg:mr-3" : "text-muted-foreground mr-2 lg:mr-3"}>
-                    {chap.number}.
-                  </span>
-                  <span className="truncate inline-block align-bottom max-w-[80%]">{chap.title}</span>
-                </Link>
+                <div key={chap.id}>
+                  {showVolumeHeader && (
+                    <div className="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide text-primary">
+                      {chap.volumeTitle || `Quyển ${chap.volumeNumber}`}
+                    </div>
+                  )}
+                  <Link
+                    id={`toc-chap-${chap.number}`}
+                    href={`/truyen/${novelSlug}/${chap.number}`}
+                    onClick={() => setIsOpen(false)}
+                    className={`block px-3 py-2 text-sm rounded-md transition-colors ${
+                      isActive
+                        ? 'bg-primary text-primary-foreground font-medium'
+                        : 'hover:bg-muted text-foreground/80'
+                    }`}
+                  >
+                    <span className={isActive ? "text-primary-foreground/90 font-bold mr-2 lg:mr-3" : "text-muted-foreground mr-2 lg:mr-3"}>
+                      {chap.volumeChapterNumber || chap.number}.
+                    </span>
+                    <span className="truncate inline-block align-bottom max-w-[80%]">{chap.title}</span>
+                  </Link>
+                </div>
               )
-            })
+              })
+            })()
           )}
         </div>
 

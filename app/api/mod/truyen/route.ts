@@ -3,6 +3,75 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { slugify } from "@/lib/utils"
+import connectToMongoDB from "@/lib/mongoose"
+import { Chapter } from "@/lib/models/chapter"
+import { deleteR2ObjectByUrl } from "@/lib/r2"
+
+function normalizeOptionalText(value: any): string {
+    return typeof value === "string" ? value.trim() : ""
+}
+
+async function resolveSeriesIdForWrite(
+    seriesIdInput: any,
+    seriesNameInput: any,
+    userRole: "USER" | "MOD" | "ADMIN",
+    userId: string
+): Promise<string | null> {
+    const seriesId = normalizeOptionalText(seriesIdInput)
+    const seriesName = normalizeOptionalText(seriesNameInput)
+
+    if (seriesId) {
+        const series = await prisma.series.findFirst({
+            where: userRole === "ADMIN"
+                ? { id: seriesId }
+                : {
+                    id: seriesId,
+                    OR: [
+                        { novels: { some: { uploaderId: userId } } },
+                        { novels: { some: { uploaderId: null } } },
+                        { novels: { none: {} } },
+                    ],
+                },
+            select: { id: true },
+        })
+
+        if (!series) {
+            throw new Error("Series không tồn tại hoặc bạn không có quyền sử dụng")
+        }
+
+        return series.id
+    }
+
+    if (!seriesName) return null
+
+    const existingSeries = await prisma.series.findFirst({
+        where: { name: { equals: seriesName, mode: "insensitive" } },
+        select: { id: true },
+    })
+
+    if (existingSeries) {
+        return existingSeries.id
+    }
+
+    const baseSlug = slugify(seriesName)
+    let slug = baseSlug
+    let counter = 1
+
+    while (await prisma.series.findUnique({ where: { slug } })) {
+        slug = `${baseSlug}-${counter}`
+        counter += 1
+    }
+
+    const createdSeries = await prisma.series.create({
+        data: {
+            name: seriesName,
+            slug,
+        },
+        select: { id: true },
+    })
+
+    return createdSeries.id
+}
 
 export async function GET() {
     const session = await getServerSession(authOptions)
@@ -12,7 +81,19 @@ export async function GET() {
 
     try {
         const novels = await prisma.novel.findMany({
-            where: { uploaderId: session.user.id },
+            where: session.user.role === "ADMIN"
+                ? undefined
+                : {
+                    OR: [
+                        { uploaderId: session.user.id },
+                        { uploaderId: null },
+                    ],
+                },
+            include: {
+                series: {
+                    select: { id: true, name: true, slug: true }
+                }
+            },
             orderBy: { updatedAt: "desc" },
         })
         return NextResponse.json(novels)
@@ -30,6 +111,7 @@ export async function POST(req: Request) {
     try {
         const data = await req.json()
         const { title, originalTitle, authorName, originalAuthorName, description, coverUrl, genreIds = [] } = data
+        const seriesId = await resolveSeriesIdForWrite(data?.seriesId, data?.seriesName, session.user.role, session.user.id)
         // Tạo slug từ title
         const slug = slugify(title)
 
@@ -42,6 +124,7 @@ export async function POST(req: Request) {
                 originalAuthorName,
                 description,
                 coverUrl,
+                seriesId,
                 uploaderId: session.user.id,
                 genres: {
                     create: genreIds.map((id: string) => ({
@@ -65,10 +148,76 @@ export async function PUT(req: Request) {
     try {
         const data = await req.json()
         const { id, title, originalTitle, authorName, originalAuthorName, description, coverUrl, status, genreIds } = data
+        const targetNovel = await prisma.novel.findFirst({
+            where: session.user.role === "ADMIN"
+                ? { id }
+                : {
+                    id,
+                    OR: [
+                        { uploaderId: session.user.id },
+                        { uploaderId: null },
+                    ],
+                },
+            select: { id: true, seriesId: true },
+        })
 
-        // Update basic info and recreate genre relations
+        if (!targetNovel) {
+            return NextResponse.json({ error: "Truyện không tồn tại hoặc không đủ quyền" }, { status: 404 })
+        }
+
+        // Disable editing series relation from novel edit form: keep current seriesId.
+        const fixedSeriesId = targetNovel.seriesId
+
+        if (fixedSeriesId) {
+            const seriesNovels = await prisma.novel.findMany({
+                where: { seriesId: fixedSeriesId },
+                select: { id: true },
+            })
+            const seriesNovelIds = seriesNovels.map((novel) => novel.id)
+
+            const updatedNovel = await prisma.$transaction(async (tx) => {
+                // Sync shared metadata for all novels in the same series.
+                await tx.novel.updateMany({
+                    where: { id: { in: seriesNovelIds } },
+                    data: {
+                        originalTitle,
+                        authorName,
+                        originalAuthorName,
+                        description,
+                        status,
+                    },
+                })
+
+                if (genreIds !== undefined) {
+                    await tx.novelGenre.deleteMany({
+                        where: { novelId: { in: seriesNovelIds } },
+                    })
+
+                    if (genreIds.length > 0) {
+                        await tx.novelGenre.createMany({
+                            data: seriesNovelIds.flatMap((novelId) =>
+                                genreIds.map((genreId: string) => ({ novelId, genreId }))
+                            ),
+                        })
+                    }
+                }
+
+                // Only current novel keeps its own title and cover.
+                return tx.novel.update({
+                    where: { id },
+                    data: {
+                        title,
+                        coverUrl,
+                        ...(session.user.role === "MOD" && { uploaderId: session.user.id }),
+                    },
+                })
+            })
+
+            return NextResponse.json(updatedNovel)
+        }
+
         const updatedNovel = await prisma.novel.update({
-            where: { id: id, uploaderId: session.user.id }, // Make sure they own it
+            where: { id },
             data: {
                 title,
                 originalTitle,
@@ -77,7 +226,8 @@ export async function PUT(req: Request) {
                 description,
                 coverUrl,
                 status,
-                // Replace all existing genres if genreIds is provided
+                seriesId: fixedSeriesId,
+                ...(session.user.role === "MOD" && { uploaderId: session.user.id }),
                 ...(genreIds !== undefined && {
                     genres: {
                         deleteMany: {},
@@ -88,6 +238,7 @@ export async function PUT(req: Request) {
                 })
             },
         })
+
         return NextResponse.json(updatedNovel)
     } catch (error) {
         return NextResponse.json({ error: "Failed to update novel" }, { status: 500 })
@@ -106,13 +257,43 @@ export async function DELETE(req: Request) {
 
         if (!id) return NextResponse.json({ error: "Thiếu ID truyện" }, { status: 400 })
 
-        // Xóa truyện. (Chapters trong MongoDB nên được xóa bằng một cron job hoặc API khác để tránh block UI quá lâu, 
-        // ở đây chúng ta chỉ xóa record của Postgres để ẩn truyện).
-        await prisma.novel.delete({
-            where: { id: id, uploaderId: session.user.id },
+        const novel = await prisma.novel.findFirst({
+            where: session.user.role === "ADMIN"
+                ? { id }
+                : {
+                    id,
+                    OR: [
+                        { uploaderId: session.user.id },
+                        { uploaderId: null },
+                    ],
+                },
+            select: { id: true, coverUrl: true, seriesId: true }
         })
 
-        return NextResponse.json({ message: "Đã xóa truyện thành công" })
+        if (!novel) {
+            return NextResponse.json({ error: "Truyện không tồn tại hoặc không đủ quyền" }, { status: 404 })
+        }
+
+        await connectToMongoDB()
+        const chapterDeleteResult = await Chapter.deleteMany({ novelId: id })
+
+        await prisma.novel.delete({
+            where: { id },
+        })
+
+        await deleteR2ObjectByUrl(novel.coverUrl).catch(() => { })
+
+        if (novel.seriesId) {
+            const remainingSeriesNovels = await prisma.novel.count({ where: { seriesId: novel.seriesId } })
+            if (remainingSeriesNovels === 0) {
+                await prisma.series.delete({ where: { id: novel.seriesId } }).catch(() => { })
+            }
+        }
+
+        return NextResponse.json({
+            message: "Đã xóa truyện và toàn bộ chương thành công",
+            deletedChapters: chapterDeleteResult.deletedCount || 0
+        })
     } catch (error) {
         return NextResponse.json({ error: "Failed to delete novel" }, { status: 500 })
     }

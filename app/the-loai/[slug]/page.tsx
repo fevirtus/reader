@@ -6,6 +6,24 @@ import { notFound } from "next/navigation"
 
 export const dynamic = "force-dynamic"
 
+function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(rows: T[]): T[] {
+  const pickedSeries = new Set<string>()
+  const output: T[] = []
+
+  for (const row of rows) {
+    if (!row.seriesId) {
+      output.push(row)
+      continue
+    }
+
+    if (pickedSeries.has(row.seriesId)) continue
+    pickedSeries.add(row.seriesId)
+    output.push(row)
+  }
+
+  return output
+}
+
 export default async function GenreDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
 
@@ -17,7 +35,7 @@ export default async function GenreDetailPage({ params }: { params: Promise<{ sl
     notFound()
   }
 
-  const allNovels = await prisma.novel.findMany({
+  const allNovelsRaw = await prisma.novel.findMany({
     where: {
       genres: {
         some: {
@@ -25,11 +43,26 @@ export default async function GenreDetailPage({ params }: { params: Promise<{ sl
         }
       }
     },
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      authorName: true,
+      coverColor: true,
+      coverUrl: true,
+      rating: true,
+      views: true,
+      totalChapters: true,
+      status: true,
+      seriesId: true,
+    },
     orderBy: {
       updatedAt: "desc"
     },
-    take: 20
+    take: 80
   })
+
+  const allNovels = collapseSeriesRows(allNovelsRaw).slice(0, 20)
 
   // Basic layout without sort for purely server side representation without search params. Optional searchParams can be added later if needed.
   return (

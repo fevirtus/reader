@@ -10,6 +10,7 @@ import { NovelDetailActions } from "./novel-detail-actions"
 import { prisma } from "@/lib/prisma"
 import connectToMongoDB from "@/lib/mongoose"
 import { Chapter } from "@/lib/models/chapter"
+import { getNovelStatusBadgeClass } from "@/lib/novel-status"
 
 export const dynamic = "force-dynamic"
 
@@ -39,32 +40,72 @@ export default async function NovelDetailPage({
     notFound()
   }
 
-  // Fetch chapters from MongoDB
+  let formattedChapters: any[] = []
+  let totalChapters = 0
+  let totalPages = 1
+  let firstChapterNumber: number | undefined
+  let seriesVolumes: Array<{
+    id: string
+    slug: string
+    title: string
+    status: string
+    totalChapters: number
+    coverUrl: string | null
+    updatedAt: Date
+  }> = []
+
   await connectToMongoDB()
-  const skip = (currentPage - 1) * limit
 
-  const [chapters, totalChapters] = await Promise.all([
-    Chapter.find({ novelId: novel.id })
-      .sort({ number: 1 })
-      .skip(skip)
-      .limit(limit)
-      .select("id novelId number title createdAt views")
-      .lean(),
-    Chapter.countDocuments({ novelId: novel.id })
-  ])
+  if (novel.seriesId) {
+    const [firstChapter, volumes] = await Promise.all([
+      Chapter.findOne({ novelId: novel.id }).sort({ number: 1 }).select("number").lean(),
+      prisma.novel.findMany({
+        where: { seriesId: novel.seriesId },
+        select: {
+          id: true,
+          slug: true,
+          title: true,
+          status: true,
+          totalChapters: true,
+          coverUrl: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: "asc" },
+      }),
+    ])
 
-  const totalPages = Math.ceil(totalChapters / limit)
+    firstChapterNumber = (firstChapter as any)?.number
+    seriesVolumes = volumes
+  } else {
+    const skip = (currentPage - 1) * limit
+    const [chapters, chaptersCount, firstChapter] = await Promise.all([
+      Chapter.find({ novelId: novel.id })
+        .sort({ number: 1 })
+        .skip(skip)
+        .limit(limit)
+        .select("id novelId number title createdAt views volumeNumber volumeTitle volumeChapterNumber")
+        .lean(),
+      Chapter.countDocuments({ novelId: novel.id }),
+      Chapter.findOne({ novelId: novel.id }).sort({ number: 1 }).select("number").lean(),
+    ])
 
-  // Convert Mongoose documents to plain objects for Server Component
-  const formattedChapters = chapters.map(c => ({
-    id: c._id.toString(),
-    novelId: c.novelId,
-    number: c.number,
-    title: c.title,
-    createdAt: (c.createdAt as Date).toISOString(),
-    views: c.views || 0,
-    content: "" // We don't fetch content for the list
-  }))
+    totalChapters = chaptersCount
+    totalPages = Math.ceil(totalChapters / limit)
+    firstChapterNumber = (firstChapter as any)?.number
+
+    formattedChapters = chapters.map(c => ({
+      id: c._id.toString(),
+      novelId: c.novelId,
+      number: c.number,
+      volumeNumber: (c as any).volumeNumber ?? null,
+      volumeTitle: (c as any).volumeTitle ?? null,
+      volumeChapterNumber: (c as any).volumeChapterNumber ?? null,
+      title: c.title,
+      createdAt: (c.createdAt as Date).toISOString(),
+      views: c.views || 0,
+      content: ""
+    }))
+  }
 
   const commentsData = await prisma.comment.findMany({
     where: { novelId: novel.id, chapterId: null },
@@ -107,7 +148,7 @@ export default async function NovelDetailPage({
       {/* Novel Header */}
       <div className="flex flex-col gap-6 md:flex-row">
         {/* Cover */}
-        <img src={novel.coverUrl || "/default-cover.svg"} alt={novel.title} className="h-64 w-44 shrink-0 self-center rounded-xl object-cover shadow-lg md:self-start bg-muted" />
+        <img src={novel.coverUrl || "/default-cover.svg"} alt={novel.title} className="h-64 w-44 shrink-0 self-center rounded-xl bg-muted object-contain shadow-lg md:self-start" />
 
         {/* Info */}
         <div className="flex flex-1 flex-col gap-3">
@@ -132,11 +173,7 @@ export default async function NovelDetailPage({
           <div className="flex flex-col gap-3 mt-3">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-muted-foreground">Trạng thái:</span>
-              <span className={`inline-block rounded-full px-4 py-1.5 text-xs font-semibold ${
-                novel.status === "Hoàn thành" ? "bg-green-500/10 text-green-600 dark:text-green-400" :
-                novel.status === "Tạm dừng" || novel.status === "Tạm ngưng" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
-                "bg-primary/10 text-primary" // Đang ra
-              }`}>
+              <span className={`inline-block rounded-full px-4 py-1.5 text-xs font-semibold ${getNovelStatusBadgeClass(novel.status)}`}>
                 {novel.status}
               </span>
             </div>
@@ -177,7 +214,7 @@ export default async function NovelDetailPage({
           </div>
 
           <div className="mt-4">
-            <NovelDetailActions novelId={novel.id} novelSlug={novel.slug} firstChapterNumber={formattedChapters[0]?.number} />
+            <NovelDetailActions novelId={novel.id} novelSlug={novel.slug} firstChapterNumber={firstChapterNumber} />
           </div>
         </div>
       </div>
@@ -188,19 +225,48 @@ export default async function NovelDetailPage({
         <div className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap">{novel.description}</div>
       </section>
 
-      {/* Chapter list */}
-      <section className="mt-8">
-        <h2 className="mb-3 text-lg font-bold text-foreground">Danh Sách Chương</h2>
-        <div className="rounded-lg border border-border bg-card">
-          <ChapterList
-            chapters={formattedChapters as any}
-            novelSlug={novel.slug}
-            currentPage={currentPage}
-            totalPages={totalPages}
-            totalChapters={totalChapters}
-          />
-        </div>
-      </section>
+      {/* Chapter list or series volumes */}
+      {novel.seriesId ? (
+        <section className="mt-8">
+          <h2 className="mb-3 text-lg font-bold text-foreground">Danh Sách Quyển</h2>
+          <div className="rounded-lg border border-border bg-card divide-y divide-border">
+            {seriesVolumes.map((volume, idx) => (
+              <Link
+                key={volume.id}
+                href={`/truyen/${volume.slug}`}
+                className={`flex items-center gap-4 px-4 py-3 hover:bg-muted/40 transition-colors ${volume.id === novel.id ? "bg-primary/5" : ""}`}
+              >
+                <span className="w-8 text-center text-sm font-semibold text-muted-foreground">{idx + 1}</span>
+                <img
+                  src={volume.coverUrl || "/default-cover.svg"}
+                  alt={volume.title}
+                  className="h-14 w-10 rounded bg-muted object-contain"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-foreground truncate">{volume.title}</p>
+                  <p className="text-xs text-muted-foreground">{volume.totalChapters} chương</p>
+                </div>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${getNovelStatusBadgeClass(volume.status)}`}>
+                  {volume.status}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <section className="mt-8">
+          <h2 className="mb-3 text-lg font-bold text-foreground">Danh Sách Chương</h2>
+          <div className="rounded-lg border border-border bg-card">
+            <ChapterList
+              chapters={formattedChapters as any}
+              novelSlug={novel.slug}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalChapters={totalChapters}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Comments */}
       <section className="mt-8">
