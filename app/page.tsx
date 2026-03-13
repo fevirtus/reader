@@ -348,8 +348,13 @@ export default async function HomePage() {
 
     const hotWeekly = weeklyRanking.slice(0, 5).map((entry) => ({ ...entry, source: "week" as const }))
     const hotMonthly = monthlyRanking.slice(0, 5).map((entry) => ({ ...entry, source: "month" as const }))
+    const hotAllTime = allTimeRanking.slice(0, 8).map((entry) => ({ ...entry, source: "all" as const }))
 
-    hotSlides = toHotCarouselItems([...hotWeekly, ...hotMonthly]).slice(0, 10)
+    hotSlides = fillUniqueRows(
+      toHotCarouselItems([...hotWeekly, ...hotMonthly]),
+      toHotCarouselItems(hotAllTime),
+      10,
+    )
 
     const usedHotIds = new Set(hotSlides.map((item) => item.id))
     const randomPool = randomPoolRaw as HomeNovel[]

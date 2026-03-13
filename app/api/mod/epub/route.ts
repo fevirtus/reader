@@ -11,6 +11,8 @@ import { convert } from "html-to-text"
 import { slugify } from "@/lib/utils"
 import { deleteR2ObjectByUrl, uploadBufferToR2 } from "@/lib/r2"
 
+export const maxDuration = 900
+
 type SplitMode = "toc" | "regex"
 type SeriesMode = "none" | "existing" | "new"
 
@@ -36,6 +38,81 @@ interface EpubCoverAsset {
     buffer: Buffer | null
     mimeType: string | null
     sourceId: string | null
+}
+
+type EpubCtor = new (epubfile: string, imagewebroot: string, chapterwebroot: string) => any
+
+function sanitizeEpubNavMapBranch(branch: any): any {
+    if (Array.isArray(branch)) {
+        branch.forEach((item) => sanitizeEpubNavMapBranch(item))
+        return branch
+    }
+
+    if (!branch || typeof branch !== "object") {
+        return branch
+    }
+
+    if ("navLabel" in branch) {
+        const navLabel = (branch as any).navLabel
+
+        if (typeof navLabel === "string") {
+            ;(branch as any).navLabel = navLabel
+        } else if (navLabel && typeof navLabel === "object") {
+            if (typeof navLabel.text === "string") {
+                ;(branch as any).navLabel = navLabel.text
+            } else if (navLabel.text !== undefined && navLabel.text !== null) {
+                ;(branch as any).navLabel = String(navLabel.text)
+            } else {
+                ;(branch as any).navLabel = ""
+            }
+        } else if (navLabel === null || navLabel === undefined) {
+            ;(branch as any).navLabel = ""
+        } else {
+            ;(branch as any).navLabel = String(navLabel)
+        }
+    }
+
+    if ((branch as any).navPoint) {
+        sanitizeEpubNavMapBranch((branch as any).navPoint)
+    }
+
+    return branch
+}
+
+function getPatchedEpubCtor(): EpubCtor {
+    const loaded = require("epub2")
+    const EPub = (loaded?.EPub || loaded) as EpubCtor
+    const proto = (EPub as any)?.prototype
+
+    if (proto && !proto.__readerSafeNavLabelPatchApplied && typeof proto.walkNavMap === "function") {
+        const originalWalkNavMap = proto.walkNavMap
+
+        proto.walkNavMap = function patchedWalkNavMap(branch: any, ...args: any[]) {
+            const safeBranch = sanitizeEpubNavMapBranch(branch)
+            return originalWalkNavMap.call(this, safeBranch, ...args)
+        }
+
+        proto.__readerSafeNavLabelPatchApplied = true
+    }
+
+    return EPub
+}
+
+function isRequestAbortedError(error: unknown): boolean {
+    if (!error) return false
+
+    const candidate = error as { code?: unknown; message?: unknown; name?: unknown }
+    const code = typeof candidate.code === "string" ? candidate.code.toUpperCase() : ""
+    const message = typeof candidate.message === "string" ? candidate.message.toLowerCase() : ""
+    const name = typeof candidate.name === "string" ? candidate.name.toLowerCase() : ""
+
+    return (
+        code === "ECONNRESET" ||
+        code === "ABORT_ERR" ||
+        message.includes("aborted") ||
+        message.includes("connection reset") ||
+        name.includes("abort")
+    )
 }
 
 const CHAPTER_REGEX_PRESETS: Record<string, string> = {
@@ -838,7 +915,7 @@ async function saveCoverBufferToR2(cover: EpubCoverAsset): Promise<string | null
 
 async function parseEpubSections(tempFilePath: string): Promise<{ metadata: any; sections: EpubSection[]; cover: EpubCoverAsset }> {
     return new Promise((resolve, reject) => {
-        const EPub = require("epub2").EPub || require("epub2")
+        const EPub = getPatchedEpubCtor()
         const epub = new EPub(tempFilePath, "", "")
 
         epub.on("error", (err: any) => reject(err))
@@ -1168,6 +1245,11 @@ export async function POST(req: Request) {
             replaced,
         }, { status: responseStatus })
     } catch (error: any) {
+        if (isRequestAbortedError(error)) {
+            console.warn("EPUB upload aborted by client or network interruption")
+            return NextResponse.json({ error: "Kết nối upload bị ngắt trong lúc xử lý" }, { status: 499 })
+        }
+
         console.error("EPUB upload error:", error)
         return NextResponse.json({ error: "Lỗi xử lý file EPUB", details: error.message }, { status: 500 })
     }

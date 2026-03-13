@@ -224,6 +224,8 @@ export function NovelClient() {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest()
             xhr.open("POST", "/api/mod/epub")
+            // Large EPUB imports can take several minutes when parsing + writing many chapters.
+            xhr.timeout = 15 * 60 * 1000
 
             xhr.upload.onprogress = (event) => {
                 if (!onProgress || !event.lengthComputable) return
@@ -232,6 +234,8 @@ export function NovelClient() {
             }
 
             xhr.onerror = () => reject(new Error("Không thể kết nối tới server"))
+            xhr.onabort = () => reject(new Error("Upload đã bị huỷ hoặc kết nối bị ngắt"))
+            xhr.ontimeout = () => reject(new Error("Upload quá lâu và đã hết thời gian chờ"))
 
             xhr.onload = () => {
                 let data: EpubUploadResponseData = {}
@@ -947,79 +951,89 @@ export function NovelClient() {
         try {
             for (const file of pendingEpubFiles) {
                 const fileKey = buildEpubFileKey(file)
-                const formData = new FormData()
-                formData.append("file", file)
-                formData.append("seriesMode", epubSeriesMode)
-                if (epubSeriesMode === "existing") formData.append("seriesId", epubSeriesId)
-                if (epubSeriesMode === "new") formData.append("seriesName", epubSeriesName.trim())
-                formData.append("splitMode", "toc")
+                try {
+                    const formData = new FormData()
+                    formData.append("file", file)
+                    formData.append("seriesMode", epubSeriesMode)
+                    if (epubSeriesMode === "existing") formData.append("seriesId", epubSeriesId)
+                    if (epubSeriesMode === "new") formData.append("seriesName", epubSeriesName.trim())
+                    formData.append("splitMode", "toc")
 
-                setBulkProgressItem(fileKey, {
-                    status: "uploading",
-                    progress: 1,
-                    message: "Đang upload...",
-                })
+                    setBulkProgressItem(fileKey, {
+                        status: "uploading",
+                        progress: 1,
+                        message: "Đang upload...",
+                    })
 
-                let upload = await uploadEpubRequest(formData, (progress) => {
-                    setBulkProgressItem(fileKey, { progress, status: "uploading" })
-                })
+                    let upload = await uploadEpubRequest(formData, (progress) => {
+                        setBulkProgressItem(fileKey, { progress, status: "uploading" })
+                    })
 
-                if (upload.status === 409 && upload.data?.code === "DUPLICATE_TITLE") {
-                    const duplicateTitle = upload.data.existingNovel?.title || file.name
+                    if (upload.status === 409 && upload.data?.code === "DUPLICATE_TITLE") {
+                        const duplicateTitle = upload.data.existingNovel?.title || file.name
 
-                    if (upload.data.canReplace === false) {
+                        if (upload.data.canReplace === false) {
+                            failed += 1
+                            setBulkProgressItem(fileKey, {
+                                status: "failed",
+                                progress: 100,
+                                message: upload.data.error || `Trùng tên ${duplicateTitle} nhưng không đủ quyền replace`,
+                            })
+                            continue
+                        }
+
+                        let shouldReplace = false
+                        if (bulkDuplicateHandling === "replace-all") {
+                            shouldReplace = true
+                        } else if (bulkDuplicateHandling === "skip-all") {
+                            shouldReplace = false
+                        } else {
+                            shouldReplace = window.confirm(`File ${file.name} trùng với truyện "${duplicateTitle}". Bạn có muốn replace không?`)
+                        }
+
+                        if (!shouldReplace) {
+                            skipped += 1
+                            setBulkProgressItem(fileKey, {
+                                status: "skipped",
+                                progress: 100,
+                                message: bulkDuplicateHandling === "skip-all" ? "Bỏ qua theo cấu hình" : "Đã bỏ qua do trùng tên",
+                            })
+                            continue
+                        }
+
+                        const retryFormData = cloneFormData(formData)
+                        retryFormData.set("replaceExisting", "true")
+                        upload = await uploadEpubRequest(retryFormData, (progress) => {
+                            setBulkProgressItem(fileKey, { progress, status: "uploading" })
+                        })
+                    }
+
+                    if (upload.ok) {
+                        success += 1
+                        if (upload.data?.replaced) {
+                            replaced += 1
+                        }
+                        setBulkProgressItem(fileKey, {
+                            status: "success",
+                            progress: 100,
+                            message: upload.data?.replaced ? "Đã replace thành công" : "Upload thành công",
+                        })
+                    } else {
                         failed += 1
                         setBulkProgressItem(fileKey, {
                             status: "failed",
                             progress: 100,
-                            message: upload.data.error || `Trùng tên ${duplicateTitle} nhưng không đủ quyền replace`,
+                            message: upload.data?.error || "Upload thất bại",
                         })
-                        continue
                     }
-
-                    let shouldReplace = false
-                    if (bulkDuplicateHandling === "replace-all") {
-                        shouldReplace = true
-                    } else if (bulkDuplicateHandling === "skip-all") {
-                        shouldReplace = false
-                    } else {
-                        shouldReplace = window.confirm(`File ${file.name} trùng với truyện "${duplicateTitle}". Bạn có muốn replace không?`)
-                    }
-
-                    if (!shouldReplace) {
-                        skipped += 1
-                        setBulkProgressItem(fileKey, {
-                            status: "skipped",
-                            progress: 100,
-                            message: bulkDuplicateHandling === "skip-all" ? "Bỏ qua theo cấu hình" : "Đã bỏ qua do trùng tên",
-                        })
-                        continue
-                    }
-
-                    const retryFormData = cloneFormData(formData)
-                    retryFormData.set("replaceExisting", "true")
-                    upload = await uploadEpubRequest(retryFormData, (progress) => {
-                        setBulkProgressItem(fileKey, { progress, status: "uploading" })
-                    })
-                }
-
-                if (upload.ok) {
-                    success += 1
-                    if (upload.data?.replaced) {
-                        replaced += 1
-                    }
-                    setBulkProgressItem(fileKey, {
-                        status: "success",
-                        progress: 100,
-                        message: upload.data?.replaced ? "Đã replace thành công" : "Upload thành công",
-                    })
-                } else {
+                } catch (err: any) {
                     failed += 1
                     setBulkProgressItem(fileKey, {
                         status: "failed",
                         progress: 100,
-                        message: upload.data?.error || "Upload thất bại",
+                        message: err?.message || "Upload thất bại do lỗi kết nối",
                     })
+                    continue
                 }
             }
 

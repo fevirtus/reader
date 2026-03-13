@@ -7,6 +7,28 @@ function toUTCDateOnly(value: Date): Date {
     return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()))
 }
 
+async function upsertDailyNovelView(novelId: string, day: Date) {
+    const delegate = (prisma as any).novelViewDaily
+    if (!delegate || typeof delegate.upsert !== "function") return
+
+    await delegate.upsert({
+        where: {
+            novelId_day: {
+                novelId,
+                day,
+            },
+        },
+        update: {
+            views: { increment: 1 },
+        },
+        create: {
+            novelId,
+            day,
+            views: 1,
+        },
+    })
+}
+
 // Lấy danh sách bookmark
 export async function GET(req: Request) {
     try {
@@ -140,28 +162,11 @@ export async function POST(req: Request) {
 
             if (shouldIncrementNovelView) {
                 const day = toUTCDateOnly(new Date())
-                await prisma.$transaction([
-                    prisma.novel.update({
-                        where: { id: novelId },
-                        data: { views: { increment: 1 } }
-                    }),
-                    prisma.novelViewDaily.upsert({
-                        where: {
-                            novelId_day: {
-                                novelId,
-                                day,
-                            },
-                        },
-                        update: {
-                            views: { increment: 1 },
-                        },
-                        create: {
-                            novelId,
-                            day,
-                            views: 1,
-                        },
-                    }),
-                ])
+                await prisma.novel.update({
+                    where: { id: novelId },
+                    data: { views: { increment: 1 } }
+                })
+                await upsertDailyNovelView(novelId, day)
             }
 
             return NextResponse.json({ status: "updated", bookmark })

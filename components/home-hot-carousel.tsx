@@ -67,8 +67,8 @@ export function HomeHotCarousel({ items }: { items: HotCarouselItem[] }) {
         <div className="space-y-4">
             <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-[0_20px_60px_-40px_rgba(251,146,60,0.45)]">
                 <div className="flex transition-transform duration-500" style={{ transform: `translateX(-${activeIndex * 100}%)` }}>
-                    {items.map((item) => (
-                        <div key={item.id} className="min-w-full">
+                    {items.map((item, index) => (
+                        <div key={`${item.id}-${item.hotSource}-${index}`} className="min-w-full">
                             <Link href={`/truyen/${item.slug}`} className="group block">
                                 <div className="grid gap-0 md:grid-cols-[320px_1fr]">
                                     <div className="relative h-[420px] overflow-hidden bg-muted/60 md:h-[460px]">
@@ -137,7 +137,7 @@ export function HomeHotCarousel({ items }: { items: HotCarouselItem[] }) {
                 <div className="flex items-center justify-center gap-2">
                     {items.map((item, index) => (
                         <button
-                            key={item.id}
+                            key={`${item.id}-${item.hotSource}-dot-${index}`}
                             type="button"
                             aria-label={`Slide ${index + 1}`}
                             onClick={() => setActiveIndex(index)}
