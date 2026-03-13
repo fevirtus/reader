@@ -13,10 +13,11 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
-import { BookOpen, Loader2, Plus, Upload, Edit, Trash2, LayoutGrid, List, Image as ImageIcon, Search, FileText } from "lucide-react"
+import { BookOpen, Loader2, Plus, Upload, Edit, Trash2, LayoutGrid, List, Image as ImageIcon, Search, FileText, X, Check, FolderOpen, ChevronLeft, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
 import { getNovelStatusBadgeClass } from "@/lib/novel-status"
+import { Progress } from "@/components/ui/progress"
 
 interface Novel {
     id: string
@@ -66,6 +67,7 @@ interface EpubPreviewData {
         title: string
         authorName: string
         description: string
+        detectedGenres?: string[]
         totalChapters: number
     }
     chaptersPreview: {
@@ -77,6 +79,29 @@ interface EpubPreviewData {
         volumeChapterNumber: number | null
         excerpt: string
     }[]
+}
+
+type BulkUploadStatus = "pending" | "uploading" | "success" | "failed" | "skipped"
+type BulkDuplicateHandling = "ask" | "replace-all" | "skip-all"
+
+interface BulkUploadProgressItem {
+    fileKey: string
+    displayName: string
+    progress: number
+    status: BulkUploadStatus
+    message?: string
+}
+
+interface EpubUploadResponseData {
+    error?: string
+    code?: string
+    canReplace?: boolean
+    existingNovel?: {
+        id: string
+        title: string
+        slug: string
+    }
+    replaced?: boolean
 }
 
 const CHAPTER_REGEX_PRESETS = [
@@ -124,6 +149,7 @@ export function NovelClient() {
     const [epubRegexPreset, setEpubRegexPreset] = useState<string>("vi_chuong")
     const [epubCustomRegex, setEpubCustomRegex] = useState("")
     const epubInputRef = useRef<HTMLInputElement>(null)
+    const epubFolderInputRef = useRef<HTMLInputElement>(null)
 
     // Form states
     const [title, setTitle] = useState("")
@@ -150,7 +176,7 @@ export function NovelClient() {
     const [genres, setGenres] = useState<Genre[]>([])
     const [seriesList, setSeriesList] = useState<SeriesOption[]>([])
     const [selectedGenres, setSelectedGenres] = useState<string[]>([])
-    const [newGenreName, setNewGenreName] = useState("")
+    const [genreQuery, setGenreQuery] = useState("")
     const [addingGenre, setAddingGenre] = useState(false)
 
     // Delete states
@@ -161,6 +187,10 @@ export function NovelClient() {
     const [searchKeyword, setSearchKeyword] = useState("")
     const [selectedNovelIds, setSelectedNovelIds] = useState<string[]>([])
     const [bulkSubmitting, setBulkSubmitting] = useState(false)
+    const [currentPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize] = useState(20)
+    const [bulkProgress, setBulkProgress] = useState<Record<string, BulkUploadProgressItem>>({})
+    const [bulkDuplicateHandling, setBulkDuplicateHandling] = useState<BulkDuplicateHandling>("ask")
 
     const getSelectedChapterRegex = () => {
         if (epubRegexPreset === "custom") {
@@ -168,6 +198,118 @@ export function NovelClient() {
         }
 
         return CHAPTER_REGEX_PRESETS.find((preset) => preset.id === epubRegexPreset)?.pattern || CHAPTER_REGEX_PRESETS[0].pattern
+    }
+
+    const normalizeEpubFiles = (files: File[]) => {
+        return files.filter((file) => file.name.toLowerCase().endsWith(".epub"))
+    }
+
+    const buildEpubFileKey = (file: File) => {
+        const relativePath = file.webkitRelativePath || file.name
+        return `${relativePath}::${file.size}::${file.lastModified}`
+    }
+
+    const cloneFormData = (source: FormData): FormData => {
+        const next = new FormData()
+        for (const [key, value] of source.entries()) {
+            next.append(key, value)
+        }
+        return next
+    }
+
+    const uploadEpubRequest = async (
+        formData: FormData,
+        onProgress?: (progress: number) => void
+    ): Promise<{ status: number; ok: boolean; data: EpubUploadResponseData }> => {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest()
+            xhr.open("POST", "/api/mod/epub")
+
+            xhr.upload.onprogress = (event) => {
+                if (!onProgress || !event.lengthComputable) return
+                const percent = Math.round((event.loaded / event.total) * 100)
+                onProgress(Math.min(99, Math.max(0, percent)))
+            }
+
+            xhr.onerror = () => reject(new Error("Không thể kết nối tới server"))
+
+            xhr.onload = () => {
+                let data: EpubUploadResponseData = {}
+                try {
+                    data = xhr.responseText ? JSON.parse(xhr.responseText) : {}
+                } catch {
+                    data = {}
+                }
+
+                resolve({
+                    status: xhr.status,
+                    ok: xhr.status >= 200 && xhr.status < 300,
+                    data,
+                })
+            }
+
+            xhr.send(formData)
+        })
+    }
+
+    const setBulkProgressItem = (fileKey: string, patch: Partial<BulkUploadProgressItem>) => {
+        setBulkProgress((prev) => {
+            const current = prev[fileKey]
+            if (!current) return prev
+
+            return {
+                ...prev,
+                [fileKey]: {
+                    ...current,
+                    ...patch,
+                },
+            }
+        })
+    }
+
+    const initializeBulkProgress = (files: File[]) => {
+        const initial: Record<string, BulkUploadProgressItem> = {}
+        for (const file of files) {
+            const fileKey = buildEpubFileKey(file)
+            initial[fileKey] = {
+                fileKey,
+                displayName: file.webkitRelativePath || file.name,
+                progress: 0,
+                status: "pending",
+            }
+        }
+        setBulkProgress(initial)
+    }
+
+    const mergeUniqueEpubFiles = (base: File[], incoming: File[]) => {
+        const merged: File[] = [...base]
+        const picked = new Set(base.map((file) => buildEpubFileKey(file)))
+
+        for (const file of incoming) {
+            const key = buildEpubFileKey(file)
+            if (picked.has(key)) continue
+            picked.add(key)
+            merged.push(file)
+        }
+
+        return merged
+    }
+
+    const appendPendingBulkEpubFiles = (incomingFiles: File[]) => {
+        const merged = mergeUniqueEpubFiles(pendingEpubFiles, incomingFiles)
+        const addedCount = merged.length - pendingEpubFiles.length
+
+        if (addedCount <= 0) {
+            toast.info("Các file EPUB đã có sẵn trong hàng đợi")
+        } else {
+            toast.success(`Đã thêm ${addedCount} file EPUB vào hàng đợi import`)
+        }
+
+        setPendingEpubFile(null)
+        setOpenEpubPreview(false)
+        setPendingEpubFiles(merged)
+        initializeBulkProgress(merged)
+        setOpenBulkEpubImport(true)
     }
 
     const fetchNovels = async () => {
@@ -224,8 +366,61 @@ export function NovelClient() {
         })
     }, [novels, searchKeyword])
 
-    const visibleNovelIds = useMemo(() => filteredNovels.map((novel) => novel.id), [filteredNovels])
+    const totalPages = Math.max(1, Math.ceil(filteredNovels.length / pageSize))
+
+    const pagedNovels = useMemo(() => {
+        const start = (currentPage - 1) * pageSize
+        return filteredNovels.slice(start, start + pageSize)
+    }, [filteredNovels, currentPage, pageSize])
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages)
+        }
+    }, [currentPage, totalPages])
+
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [searchKeyword])
+
+    const normalizedGenreQuery = genreQuery.trim().toLowerCase()
+    const matchedGenres = useMemo(() => {
+        if (!normalizedGenreQuery) return []
+        return genres
+            .filter((genre) => genre.name.toLowerCase().includes(normalizedGenreQuery))
+            .slice(0, 8)
+    }, [genres, normalizedGenreQuery])
+
+    const exactMatchedGenre = useMemo(() => {
+        if (!normalizedGenreQuery) return null
+        return genres.find((genre) => genre.name.trim().toLowerCase() === normalizedGenreQuery) || null
+    }, [genres, normalizedGenreQuery])
+
+    const selectedGenreItems = useMemo(() => {
+        const byId = new Map(genres.map((genre) => [genre.id, genre]))
+        return selectedGenres
+            .map((id) => byId.get(id))
+            .filter((genre): genre is Genre => Boolean(genre))
+    }, [genres, selectedGenres])
+
+    const visibleNovelIds = useMemo(() => pagedNovels.map((novel) => novel.id), [pagedNovels])
     const allVisibleSelected = visibleNovelIds.length > 0 && visibleNovelIds.every((id) => selectedNovelIds.includes(id))
+
+    const bulkProgressItems = useMemo(() => {
+        return pendingEpubFiles
+            .map((file) => bulkProgress[buildEpubFileKey(file)])
+            .filter((item): item is BulkUploadProgressItem => Boolean(item))
+    }, [pendingEpubFiles, bulkProgress])
+
+    const processedBulkCount = useMemo(
+        () => bulkProgressItems.filter((item) => ["success", "failed", "skipped"].includes(item.status)).length,
+        [bulkProgressItems]
+    )
+
+    const overallBulkProgress = useMemo(() => {
+        if (bulkProgressItems.length === 0) return 0
+        return Math.round((processedBulkCount / bulkProgressItems.length) * 100)
+    }, [bulkProgressItems, processedBulkCount])
 
     const toggleNovelSelection = (id: string) => {
         setSelectedNovelIds((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id])
@@ -279,21 +474,30 @@ export function NovelClient() {
     }
 
     const handleAddGenre = async () => {
-        if (!newGenreName.trim()) return
+        const inputName = genreQuery.trim()
+        if (!inputName) return
+
+        const existed = genres.find((genre) => genre.name.trim().toLowerCase() === inputName.toLowerCase())
+        if (existed) {
+            setSelectedGenres((prev) => prev.includes(existed.id) ? prev : [...prev, existed.id])
+            setGenreQuery("")
+            return
+        }
+
         setAddingGenre(true)
         try {
             const res = await fetch("/api/mod/the-loai", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: newGenreName, description: "" })
+                body: JSON.stringify({ name: inputName, description: "" })
             })
             const data = await res.json()
             if (!res.ok) throw new Error(data.error || "Thêm lỗi")
 
             toast.success("Thêm thể loại thành công")
-            setNewGenreName("")
+            setGenreQuery("")
             fetchGenres()
-            setSelectedGenres(prev => [...prev, data.id])
+            setSelectedGenres(prev => prev.includes(data.id) ? prev : [...prev, data.id])
         } catch (error: any) {
             toast.error(error.message)
         } finally {
@@ -316,9 +520,110 @@ export function NovelClient() {
             fetchGenres()
             // Clean up from selected lists
             setSelectedGenres(prev => prev.filter(gId => gId !== id))
+            if (genreQuery.trim() && genreQuery.trim().toLowerCase() === name.trim().toLowerCase()) {
+                setGenreQuery("")
+            }
         } catch (error: any) {
             toast.error(error.message)
         }
+    }
+
+    const renderGenreSelector = (label: string) => {
+        const actionLabel = exactMatchedGenre
+            ? (selectedGenres.includes(exactMatchedGenre.id) ? "Đã chọn" : "Chọn")
+            : "Tạo"
+
+        return (
+            <div className="space-y-2">
+                <label className="text-sm font-medium">{label}</label>
+                <div className="flex gap-2">
+                    <Input
+                        placeholder="Nhập để tìm thể loại..."
+                        value={genreQuery}
+                        onChange={(e) => setGenreQuery(e.target.value)}
+                        className="flex-1"
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                e.preventDefault()
+                                handleAddGenre()
+                            }
+                        }}
+                    />
+                    <Button type="button" variant="secondary" onClick={handleAddGenre} disabled={addingGenre || !genreQuery.trim()}>
+                        {addingGenre ? <Loader2 className="w-4 h-4 animate-spin" /> : actionLabel}
+                    </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                    Nhập tên thể loại để tìm trong hệ thống. Nếu chưa có, bấm Tạo để thêm mới.
+                </p>
+
+                <div className="space-y-2 rounded-md border bg-card p-2">
+                    <div className="flex flex-wrap gap-2">
+                        {selectedGenreItems.map((genre) => (
+                            <div key={genre.id} className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/15 px-3 py-1 text-xs text-primary">
+                                <span className="font-medium">{genre.name}</span>
+                                <button
+                                    type="button"
+                                    className="inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-muted hover:text-foreground"
+                                    onClick={() => toggleGenre(genre.id)}
+                                    title="Bỏ chọn"
+                                >
+                                    <X className="h-3 w-3" />
+                                </button>
+                                <button
+                                    type="button"
+                                    className="inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground"
+                                    onClick={() => handleDeleteGenre(genre.id, genre.name)}
+                                    title="Xóa khỏi hệ thống"
+                                >
+                                    <Trash2 className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ))}
+                        {selectedGenreItems.length === 0 && (
+                            <span className="p-1 text-xs text-muted-foreground">Chưa chọn thể loại nào</span>
+                        )}
+                    </div>
+
+                    {genreQuery.trim().length > 0 && (
+                        <div className="border-t pt-2">
+                            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Kết quả phù hợp</p>
+                            <div className="flex flex-wrap gap-2">
+                                {matchedGenres.map((genre) => {
+                                    const isSelected = selectedGenres.includes(genre.id)
+                                    return (
+                                        <div
+                                            key={genre.id}
+                                            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${isSelected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-muted/50 text-muted-foreground"}`}
+                                        >
+                                            <button
+                                                type="button"
+                                                className="inline-flex items-center gap-1"
+                                                onClick={() => toggleGenre(genre.id)}
+                                            >
+                                                {genre.name}
+                                                {isSelected && <Check className="h-3 w-3" />}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground"
+                                                onClick={() => handleDeleteGenre(genre.id, genre.name)}
+                                                title="Xóa khỏi hệ thống"
+                                            >
+                                                <Trash2 className="h-3 w-3" />
+                                            </button>
+                                        </div>
+                                    )
+                                })}
+                                {matchedGenres.length === 0 && (
+                                    <span className="p-1 text-xs text-muted-foreground">Không có thể loại phù hợp. Bấm Tạo để thêm mới.</span>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )
     }
 
     const handleAddSubmit = async (e: React.FormEvent) => {
@@ -373,6 +678,7 @@ export function NovelClient() {
             setNewSeriesName("")
             setStatus("Đang ra")
             setSelectedGenres([])
+            setGenreQuery("")
             fetchNovels()
             fetchSeries()
         } catch {
@@ -388,6 +694,8 @@ export function NovelClient() {
         setEpubPreviewData(null)
         setPendingEpubFile(null)
         setPendingEpubFiles([])
+        setBulkProgress({})
+        setBulkDuplicateHandling("ask")
         setEpubTitle("")
         setEpubAuthorName("")
         setEpubDescription("")
@@ -399,6 +707,9 @@ export function NovelClient() {
         setEpubCustomRegex("")
         if (epubInputRef.current) {
             epubInputRef.current.value = ""
+        }
+        if (epubFolderInputRef.current) {
+            epubFolderInputRef.current.value = ""
         }
     }
 
@@ -457,23 +768,27 @@ export function NovelClient() {
     }
 
     const handleEpubSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(e.target.files || [])
-        if (files.length === 0) return
+        const selectedFiles = Array.from(e.target.files || [])
+        if (selectedFiles.length === 0) return
 
-        if (files.some((file) => !file.name.endsWith('.epub'))) {
-            toast.error("Vui lòng chọn file định dạng .epub")
-            e.target.value = "" // Reset input
-            return
-        }
-
-        if (files.length > 1) {
-            setPendingEpubFiles(files)
-            setOpenBulkEpubImport(true)
+        const epubFiles = normalizeEpubFiles(selectedFiles)
+        if (epubFiles.length === 0) {
+            toast.error("Không tìm thấy file .epub trong lựa chọn")
             e.target.value = ""
             return
         }
 
-        const file = files[0]
+        if (epubFiles.length !== selectedFiles.length) {
+            toast.info(`Đã bỏ qua ${selectedFiles.length - epubFiles.length} file không phải EPUB`)
+        }
+
+        if (epubFiles.length > 1 || openBulkEpubImport) {
+            appendPendingBulkEpubFiles(epubFiles)
+            e.target.value = ""
+            return
+        }
+
+        const file = epubFiles[0]
 
         setPendingEpubFile(file)
 
@@ -491,6 +806,21 @@ export function NovelClient() {
             setPreviewingEpub(false)
             e.target.value = ""
         }
+    }
+
+    const handleEpubFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFiles = Array.from(e.target.files || [])
+        if (selectedFiles.length === 0) return
+
+        const epubFiles = normalizeEpubFiles(selectedFiles)
+        if (epubFiles.length === 0) {
+            toast.error("Không tìm thấy file .epub trong thư mục đã chọn")
+            e.target.value = ""
+            return
+        }
+
+        appendPendingBulkEpubFiles(epubFiles)
+        e.target.value = ""
     }
 
     const handleReparseEpub = async () => {
@@ -552,17 +882,34 @@ export function NovelClient() {
         }
 
         try {
-            const res = await fetch("/api/mod/epub", {
-                method: "POST",
-                body: formData,
-            })
+            let upload = await uploadEpubRequest(formData)
 
-            if (!res.ok) {
-                const data = await res.json()
-                throw new Error(data.error || "Lỗi khi tải lên EPUB")
+            if (upload.status === 409 && upload.data?.code === "DUPLICATE_TITLE") {
+                const duplicateTitle = upload.data.existingNovel?.title || epubTitle
+                if (upload.data.canReplace === false) {
+                    throw new Error(upload.data.error || `Truyện ${duplicateTitle} đã tồn tại và bạn không có quyền ghi đè`)
+                }
+
+                const shouldReplace = window.confirm(`Truyện "${duplicateTitle}" đã tồn tại. Bạn có muốn replace truyện này không?`)
+                if (!shouldReplace) {
+                    toast.info("Đã hủy upload vì trùng tên truyện")
+                    return
+                }
+
+                const retryFormData = cloneFormData(formData)
+                retryFormData.set("replaceExisting", "true")
+                upload = await uploadEpubRequest(retryFormData)
             }
 
-            toast.success("Đã tải lên EPUB thành công")
+            if (!upload.ok) {
+                throw new Error(upload.data?.error || "Lỗi khi tải lên EPUB")
+            }
+
+            if (upload.data?.replaced) {
+                toast.success("Đã replace truyện từ EPUB thành công")
+            } else {
+                toast.success("Đã tải lên EPUB thành công")
+            }
             resetEpubPreviewState()
             fetchNovels()
             fetchSeries()
@@ -590,11 +937,16 @@ export function NovelClient() {
         }
 
         setUploadingEpub(true)
+        initializeBulkProgress(pendingEpubFiles)
+
         let success = 0
         let failed = 0
+        let skipped = 0
+        let replaced = 0
 
         try {
             for (const file of pendingEpubFiles) {
+                const fileKey = buildEpubFileKey(file)
                 const formData = new FormData()
                 formData.append("file", file)
                 formData.append("seriesMode", epubSeriesMode)
@@ -602,19 +954,79 @@ export function NovelClient() {
                 if (epubSeriesMode === "new") formData.append("seriesName", epubSeriesName.trim())
                 formData.append("splitMode", "toc")
 
-                const res = await fetch("/api/mod/epub", {
-                    method: "POST",
-                    body: formData,
+                setBulkProgressItem(fileKey, {
+                    status: "uploading",
+                    progress: 1,
+                    message: "Đang upload...",
                 })
 
-                if (res.ok) success += 1
-                else failed += 1
+                let upload = await uploadEpubRequest(formData, (progress) => {
+                    setBulkProgressItem(fileKey, { progress, status: "uploading" })
+                })
+
+                if (upload.status === 409 && upload.data?.code === "DUPLICATE_TITLE") {
+                    const duplicateTitle = upload.data.existingNovel?.title || file.name
+
+                    if (upload.data.canReplace === false) {
+                        failed += 1
+                        setBulkProgressItem(fileKey, {
+                            status: "failed",
+                            progress: 100,
+                            message: upload.data.error || `Trùng tên ${duplicateTitle} nhưng không đủ quyền replace`,
+                        })
+                        continue
+                    }
+
+                    let shouldReplace = false
+                    if (bulkDuplicateHandling === "replace-all") {
+                        shouldReplace = true
+                    } else if (bulkDuplicateHandling === "skip-all") {
+                        shouldReplace = false
+                    } else {
+                        shouldReplace = window.confirm(`File ${file.name} trùng với truyện "${duplicateTitle}". Bạn có muốn replace không?`)
+                    }
+
+                    if (!shouldReplace) {
+                        skipped += 1
+                        setBulkProgressItem(fileKey, {
+                            status: "skipped",
+                            progress: 100,
+                            message: bulkDuplicateHandling === "skip-all" ? "Bỏ qua theo cấu hình" : "Đã bỏ qua do trùng tên",
+                        })
+                        continue
+                    }
+
+                    const retryFormData = cloneFormData(formData)
+                    retryFormData.set("replaceExisting", "true")
+                    upload = await uploadEpubRequest(retryFormData, (progress) => {
+                        setBulkProgressItem(fileKey, { progress, status: "uploading" })
+                    })
+                }
+
+                if (upload.ok) {
+                    success += 1
+                    if (upload.data?.replaced) {
+                        replaced += 1
+                    }
+                    setBulkProgressItem(fileKey, {
+                        status: "success",
+                        progress: 100,
+                        message: upload.data?.replaced ? "Đã replace thành công" : "Upload thành công",
+                    })
+                } else {
+                    failed += 1
+                    setBulkProgressItem(fileKey, {
+                        status: "failed",
+                        progress: 100,
+                        message: upload.data?.error || "Upload thất bại",
+                    })
+                }
             }
 
-            if (success > 0 && failed === 0) {
-                toast.success(`Đã import ${success} file EPUB vào series thành công`)
-            } else if (success > 0) {
-                toast.warning(`Import thành công ${success} file, thất bại ${failed} file`)
+            if (success > 0 && failed === 0 && skipped === 0) {
+                toast.success(`Đã import ${success} file EPUB thành công${replaced > 0 ? ` (${replaced} file replace)` : ""}`)
+            } else if (success > 0 || skipped > 0) {
+                toast.warning(`Import: thành công ${success}${replaced > 0 ? ` (${replaced} replace)` : ""}, thất bại ${failed}, bỏ qua ${skipped}`)
             } else {
                 toast.error("Import EPUB thất bại")
             }
@@ -674,6 +1086,7 @@ export function NovelClient() {
         }
         setStatus(novel.status)
         setDescription("")
+        setGenreQuery("")
         setOriginalTitle("")
         setOriginalAuthorName("")
         setCoverUrl(novel.coverUrl || "")
@@ -818,6 +1231,16 @@ export function NovelClient() {
                         onChange={handleEpubSelect}
                         disabled={previewingEpub || uploadingEpub}
                     />
+                    <input
+                        type="file"
+                        id="epub-folder-upload"
+                        ref={epubFolderInputRef}
+                        multiple
+                        className="hidden"
+                        onChange={handleEpubFolderSelect}
+                        disabled={previewingEpub || uploadingEpub}
+                        {...({ webkitdirectory: "", directory: "" } as any)}
+                    />
                     <Button
                         variant="secondary"
                         className="gap-2"
@@ -825,7 +1248,16 @@ export function NovelClient() {
                         onClick={() => document.getElementById('epub-upload')?.click()}
                     >
                         {previewingEpub || uploadingEpub ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                        {previewingEpub ? "Đang phân tích EPUB..." : uploadingEpub ? "Đang xuất bản..." : "Tải lên EPUB"}
+                        {previewingEpub ? "Đang phân tích EPUB..." : uploadingEpub ? "Đang xuất bản..." : "Chọn file EPUB"}
+                    </Button>
+                    <Button
+                        variant="outline"
+                        className="gap-2"
+                        disabled={previewingEpub || uploadingEpub}
+                        onClick={() => document.getElementById('epub-folder-upload')?.click()}
+                    >
+                        <FolderOpen className="h-4 w-4" />
+                        Chọn thư mục EPUB
                     </Button>
 
                     <Dialog
@@ -838,7 +1270,7 @@ export function NovelClient() {
                             }
                         }}
                     >
-                        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+                        <DialogContent className="w-[96vw] max-w-[96vw] sm:!max-w-[960px] max-h-[85vh] overflow-y-auto overflow-x-hidden">
                             <DialogHeader>
                                 <DialogTitle>Xem trước truyện từ EPUB</DialogTitle>
                                 <DialogDescription>
@@ -851,6 +1283,12 @@ export function NovelClient() {
                                     <div className="rounded-md border bg-muted/30 p-3 text-sm">
                                         <p><span className="font-semibold">File:</span> {epubPreviewData.fileName}</p>
                                         <p><span className="font-semibold">Số chương:</span> {epubPreviewData.novel.totalChapters}</p>
+                                        {Array.isArray(epubPreviewData.novel.detectedGenres) && epubPreviewData.novel.detectedGenres.length > 0 && (
+                                            <p>
+                                                <span className="font-semibold">Thể loại nhận diện:</span>{" "}
+                                                {epubPreviewData.novel.detectedGenres.join(", ")}
+                                            </p>
+                                        )}
                                         <p>
                                             <span className="font-semibold">Cover từ EPUB:</span>{" "}
                                             {epubPreviewData.hasCoverFromEpub ? "Có (sẽ tự gán làm ảnh bìa)" : "Không tìm thấy cover"}
@@ -1031,12 +1469,18 @@ export function NovelClient() {
                                                                 {chapter.volumeTitle || `Quyển ${chapter.volumeNumber}`}
                                                             </p>
                                                         )}
-                                                        <p className="text-sm font-medium">
-                                                            {chapter.volumeChapterNumber
+                                                        {(() => {
+                                                            const titleHasHeading = /^(?:ch(?:ương|apter)?|ch\.)\s*\d+/i.test(chapter.title)
+                                                            const chapterLabel = chapter.volumeChapterNumber
                                                                 ? `Chương ${chapter.volumeChapterNumber}`
-                                                                : `Chương ${chapter.number}`}
-                                                            : {chapter.title}
-                                                        </p>
+                                                                : `Chương ${chapter.number}`
+
+                                                            return (
+                                                                <p className="text-sm font-medium">
+                                                                    {titleHasHeading ? chapter.title : `${chapterLabel}: ${chapter.title}`}
+                                                                </p>
+                                                            )
+                                                        })()}
                                                         {chapter.isPlaceholder && (
                                                             <p className="mt-1 text-[11px] font-semibold text-amber-600">
                                                                 Placeholder chương thiếu - cần bổ sung nội dung sau
@@ -1088,15 +1532,97 @@ export function NovelClient() {
                             }
                         }}
                     >
-                        <DialogContent className="sm:max-w-[560px]">
+                        <DialogContent className="w-[96vw] max-w-[96vw] sm:!max-w-[920px] max-h-[85vh] overflow-y-auto">
                             <DialogHeader>
                                 <DialogTitle>Import nhiều EPUB vào series</DialogTitle>
                                 <DialogDescription>
-                                    Đã chọn {pendingEpubFiles.length} file EPUB. Mỗi file sẽ tạo thành một truyện và được gán vào cùng series.
+                                    Đã chọn {pendingEpubFiles.length} file EPUB (từ file lẻ hoặc thư mục con). Mỗi file sẽ tạo thành một truyện và được gán vào cùng series.
                                 </DialogDescription>
                             </DialogHeader>
 
                             <div className="space-y-3">
+                                <div className="flex flex-wrap gap-2">
+                                    <Button type="button" variant="outline" size="sm" onClick={() => epubInputRef.current?.click()} disabled={uploadingEpub}>
+                                        <Upload className="mr-1.5 h-3.5 w-3.5" />
+                                        Thêm file EPUB
+                                    </Button>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => epubFolderInputRef.current?.click()} disabled={uploadingEpub}>
+                                        <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+                                        Thêm thư mục
+                                    </Button>
+                                </div>
+
+                                <div className="grid gap-2 rounded-md border bg-muted/20 p-3">
+                                    <label className="text-sm font-medium">Khi trùng tên truyện</label>
+                                    <select
+                                        value={bulkDuplicateHandling}
+                                        onChange={(e) => setBulkDuplicateHandling(e.target.value as BulkDuplicateHandling)}
+                                        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                        disabled={uploadingEpub}
+                                    >
+                                        <option value="ask">Hỏi từng file</option>
+                                        <option value="replace-all">Replace tất cả file trùng tên</option>
+                                        <option value="skip-all">Bỏ qua tất cả file trùng tên</option>
+                                    </select>
+                                    <p className="text-xs text-muted-foreground">
+                                        Gợi ý: dùng "Replace tất cả" khi import lại bộ truyện cũ theo lô để không bị popup lặp.
+                                    </p>
+                                </div>
+
+                                <div className="rounded-md border bg-muted/20 p-2">
+                                    <div className="mb-2 flex items-center justify-between">
+                                        <p className="text-xs font-medium text-muted-foreground">Tiến trình import từng file</p>
+                                        <span className="text-xs text-muted-foreground">{processedBulkCount}/{bulkProgressItems.length}</span>
+                                    </div>
+
+                                    <Progress value={overallBulkProgress} className="mb-2 bg-muted/70" />
+
+                                    <div className="max-h-44 overflow-auto pr-1 custom-scrollbar">
+                                        <div className="min-w-[760px] space-y-2">
+                                        {bulkProgressItems.map((item) => (
+                                            <div key={item.fileKey} className="space-y-1 rounded border bg-background/70 p-2">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <p className="text-xs font-medium whitespace-nowrap" title={item.displayName}>{item.displayName}</p>
+                                                    <span className={`shrink-0 text-[11px] font-medium ${item.status === "success"
+                                                        ? "text-emerald-600"
+                                                        : item.status === "failed"
+                                                            ? "text-red-600"
+                                                            : item.status === "skipped"
+                                                                ? "text-amber-600"
+                                                                : item.status === "uploading"
+                                                                    ? "text-blue-600"
+                                                                    : "text-muted-foreground"}`}>
+                                                        {item.status === "success"
+                                                            ? "Thành công"
+                                                            : item.status === "failed"
+                                                                ? "Thất bại"
+                                                                : item.status === "skipped"
+                                                                    ? "Bỏ qua"
+                                                                    : item.status === "uploading"
+                                                                        ? "Đang upload"
+                                                                        : "Chờ"}
+                                                    </span>
+                                                </div>
+                                                <Progress
+                                                    value={item.progress}
+                                                    className={item.status === "success"
+                                                        ? "bg-emerald-100/50 [&>[data-slot=progress-indicator]]:bg-emerald-500"
+                                                        : item.status === "failed"
+                                                            ? "bg-red-100/50 [&>[data-slot=progress-indicator]]:bg-red-500"
+                                                            : item.status === "skipped"
+                                                                ? "bg-amber-100/50 [&>[data-slot=progress-indicator]]:bg-amber-500"
+                                                                : item.status === "pending"
+                                                                    ? "bg-muted [&>[data-slot=progress-indicator]]:bg-muted-foreground/40"
+                                                                    : "bg-blue-100/50 [&>[data-slot=progress-indicator]]:bg-blue-500"
+                                                    }
+                                                />
+                                                {item.message && <p className="text-[11px] text-muted-foreground">{item.message}</p>}
+                                            </div>
+                                        ))}
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div className="grid gap-2">
                                     <label className="text-sm font-medium">Series</label>
                                     <select
@@ -1147,7 +1673,7 @@ export function NovelClient() {
                                 )}
                             </div>
 
-                            <DialogFooter>
+                            <DialogFooter className="sticky bottom-0 bg-background pt-2">
                                 <Button variant="outline" onClick={resetEpubPreviewState} disabled={uploadingEpub}>Huỷ</Button>
                                 <Button
                                     onClick={handleBulkEpubUpload}
@@ -1168,7 +1694,7 @@ export function NovelClient() {
                     <Dialog open={openAdd} onOpenChange={(val) => {
                         setOpenAdd(val);
                         if (val) {
-                                setTitle(""); setOriginalTitle(""); setAuthorName(""); setOriginalAuthorName(""); setDescription(""); setCoverUrl(""); setSeriesMode("none"); setSelectedSeriesId(""); setNewSeriesName(""); setSelectedGenres([]); setNewGenreName("");
+                                setTitle(""); setOriginalTitle(""); setAuthorName(""); setOriginalAuthorName(""); setDescription(""); setCoverUrl(""); setSeriesMode("none"); setSelectedSeriesId(""); setNewSeriesName(""); setSelectedGenres([]); setGenreQuery("");
                         }
                     }}>
                         <DialogTrigger asChild>
@@ -1272,38 +1798,7 @@ export function NovelClient() {
                                         </div>
                                     )}
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium">Thêm thể loại</label>
-                                    <div className="flex gap-2">
-                                        <Input
-                                            placeholder="Tên thể loại mới..."
-                                            value={newGenreName}
-                                            onChange={(e) => setNewGenreName(e.target.value)}
-                                            className="flex-1"
-                                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddGenre(); } }}
-                                        />
-                                        <Button type="button" variant="secondary" onClick={handleAddGenre} disabled={addingGenre || !newGenreName.trim()}>
-                                            {addingGenre ? <Loader2 className="w-4 h-4 animate-spin" /> : "Tạo"}
-                                        </Button>
-                                    </div>
-                                    <div className="flex flex-wrap gap-2 mt-2 max-h-32 overflow-y-auto p-2 border rounded-md custom-scrollbar bg-card">
-                                        {genres.map(genre => (
-                                            <div
-                                                key={genre.id}
-                                                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border transition-colors select-none ${selectedGenres.includes(genre.id) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted/50 text-muted-foreground'}`}
-                                            >
-                                                <span className="cursor-pointer" onClick={() => toggleGenre(genre.id)}>{genre.name}</span>
-                                                <div
-                                                    className="cursor-pointer hover:bg-destructive hover:text-destructive-foreground rounded-full p-0.5 ml-1 inline-flex items-center justify-center transition-colors"
-                                                    onClick={(e) => { e.stopPropagation(); handleDeleteGenre(genre.id, genre.name); }}
-                                                >
-                                                    <Trash2 className="w-3 h-3" />
-                                                </div>
-                                            </div>
-                                        ))}
-                                        {genres.length === 0 && <span className="text-xs text-muted-foreground p-1">Chưa có thể loại nào</span>}
-                                    </div>
-                                </div>
+                                {renderGenreSelector("Thể loại")}
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium">Giới thiệu ngắn (Mô tả)</label>
                                     <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Tóm tắt về câu chuyện..." rows={4} />
@@ -1374,37 +1869,7 @@ export function NovelClient() {
                                             </div>
                                         )}
                                     </div>
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-medium">Cập nhật thể loại</label>
-                                        <div className="flex gap-2">
-                                            <Input
-                                                placeholder="Tên thể loại mới..."
-                                                value={newGenreName}
-                                                onChange={(e) => setNewGenreName(e.target.value)}
-                                                className="flex-1"
-                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddGenre(); } }}
-                                            />
-                                            <Button type="button" variant="secondary" onClick={handleAddGenre} disabled={addingGenre || !newGenreName.trim()}>
-                                                {addingGenre ? <Loader2 className="w-4 h-4 animate-spin" /> : "Tạo"}
-                                            </Button>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2 mt-2 max-h-32 overflow-y-auto p-2 border rounded-md custom-scrollbar bg-card">
-                                            {genres.map(genre => (
-                                                <div
-                                                    key={genre.id}
-                                                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border transition-colors select-none ${selectedGenres.includes(genre.id) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted/50 text-muted-foreground'}`}
-                                                >
-                                                    <span className="cursor-pointer" onClick={() => toggleGenre(genre.id)}>{genre.name}</span>
-                                                    <div
-                                                        className="cursor-pointer hover:bg-destructive hover:text-destructive-foreground rounded-full p-0.5 ml-1 inline-flex items-center justify-center transition-colors"
-                                                        onClick={(e) => { e.stopPropagation(); handleDeleteGenre(genre.id, genre.name); }}
-                                                    >
-                                                        <Trash2 className="w-3 h-3" />
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
+                                    {renderGenreSelector("Cập nhật thể loại")}
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium">Trạng thái</label>
                                         <select
@@ -1474,9 +1939,52 @@ export function NovelClient() {
                         />
                     </div>
 
-                    <Button type="button" variant="outline" onClick={toggleSelectAllVisible}>
-                        {allVisibleSelected ? "Bỏ chọn danh sách đang lọc" : "Chọn danh sách đang lọc"}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <select
+                            value={String(pageSize)}
+                            onChange={(e) => {
+                                const nextSize = Number(e.target.value)
+                                setPageSize(nextSize)
+                                setCurrentPage(1)
+                            }}
+                            className="h-10 rounded-md border bg-background px-3 text-sm"
+                        >
+                            <option value="10">10 / trang</option>
+                            <option value="20">20 / trang</option>
+                            <option value="30">30 / trang</option>
+                            <option value="50">50 / trang</option>
+                        </select>
+
+                        <Button type="button" variant="outline" onClick={toggleSelectAllVisible}>
+                            {allVisibleSelected ? "Bỏ chọn trang hiện tại" : "Chọn trang hiện tại"}
+                        </Button>
+                    </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                    <span>
+                        Trang {currentPage}/{totalPages} - Hiển thị {pagedNovels.length} trên {filteredNovels.length} truyện
+                    </span>
+                    <div className="flex items-center gap-1">
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                            disabled={currentPage <= 1}
+                        >
+                            <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                            disabled={currentPage >= totalPages}
+                        >
+                            <ChevronRight className="h-4 w-4" />
+                        </Button>
+                    </div>
                 </div>
 
                 {selectedNovelIds.length > 0 && (
@@ -1524,7 +2032,7 @@ export function NovelClient() {
                                 ) : filteredNovels.length === 0 ? (
                                     <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">Không có truyện phù hợp với từ khóa tìm kiếm.</td></tr>
                                 ) : (
-                                    filteredNovels.map((novel) => (
+                                    pagedNovels.map((novel) => (
                                         <tr key={novel.id} className="border-b border-border hover:bg-muted/30 transition-colors last:border-0">
                                             <td className="px-4 py-4 text-center">
                                                 <input
@@ -1589,7 +2097,7 @@ export function NovelClient() {
                         ) : filteredNovels.length === 0 ? (
                             <div className="col-span-full py-12 text-center text-muted-foreground">Không có truyện phù hợp với từ khóa tìm kiếm.</div>
                         ) : (
-                            filteredNovels.map((novel) => (
+                            pagedNovels.map((novel) => (
                                 <div key={novel.id} className="group relative flex flex-col rounded-xl overflow-hidden border shadow-sm transition-all hover:-translate-y-1 hover:shadow-md bg-card">
                                     <div className="aspect-[2/3] w-full bg-muted relative border-b">
                                         <div className="absolute left-2 top-2 z-10">

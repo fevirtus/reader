@@ -2,7 +2,7 @@ import { redirect } from "next/navigation"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import Link from "next/link"
-import { BookOpen, Home } from "lucide-react"
+import { AlertTriangle, BookOpen, Home } from "lucide-react"
 
 export default async function ModLayout({
     children,
@@ -27,6 +27,9 @@ export default async function ModLayout({
                     </Link>
                     <Link href="/mod/truyen" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-secondary">
                         <BookOpen className="h-4 w-4" /> Quản lý truyện
+                    </Link>
+                    <Link href="/mod/thieu-thong-tin" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-secondary">
+                        <AlertTriangle className="h-4 w-4" /> Truyện thiếu dữ liệu
                     </Link>
                 </nav>
             </aside>

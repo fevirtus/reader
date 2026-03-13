@@ -3,6 +3,10 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 
+function toUTCDateOnly(value: Date): Date {
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()))
+}
+
 // Lấy danh sách bookmark
 export async function GET(req: Request) {
     try {
@@ -135,10 +139,29 @@ export async function POST(req: Request) {
             })
 
             if (shouldIncrementNovelView) {
-                await prisma.novel.update({
-                    where: { id: novelId },
-                    data: { views: { increment: 1 } }
-                })
+                const day = toUTCDateOnly(new Date())
+                await prisma.$transaction([
+                    prisma.novel.update({
+                        where: { id: novelId },
+                        data: { views: { increment: 1 } }
+                    }),
+                    prisma.novelViewDaily.upsert({
+                        where: {
+                            novelId_day: {
+                                novelId,
+                                day,
+                            },
+                        },
+                        update: {
+                            views: { increment: 1 },
+                        },
+                        create: {
+                            novelId,
+                            day,
+                            views: 1,
+                        },
+                    }),
+                ])
             }
 
             return NextResponse.json({ status: "updated", bookmark })

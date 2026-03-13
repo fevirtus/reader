@@ -9,10 +9,12 @@ import os from "os"
 import { promises as fs } from "fs"
 import { convert } from "html-to-text"
 import { slugify } from "@/lib/utils"
-import { uploadBufferToR2 } from "@/lib/r2"
+import { deleteR2ObjectByUrl, uploadBufferToR2 } from "@/lib/r2"
 
 type SplitMode = "toc" | "regex"
 type SeriesMode = "none" | "existing" | "new"
+
+type UserRole = "USER" | "MOD" | "ADMIN"
 
 interface EpubSection {
     sourceTitle: string
@@ -46,6 +48,79 @@ const CHAPTER_REGEX_PRESETS: Record<string, string> = {
 const NOISE_TITLE_REGEX = /^(?:mục lục|table of contents|toc|cover|bìa|copyright)$/i
 
 const SIMPLE_CHAPTER_TITLE_REGEX = /^(?:ch(?:ương|apter)?|ch\.)\s*\d+(?:\.\d+)?\s*:?$/i
+const GENERIC_SECTION_TITLE_REGEX = /^(?:m[uụ]c|section|sec\.?|part|ph[aầ]n)\s*[0-9ivxlcdm]+$/i
+const WEAK_CHAPTER_TOC_TITLE_REGEX = /^(?:ch(?:ương|apter)?|ch\.)\s*\d+(?:\.\d+)?\s*[:\-–—]\s*(?:m[uụ]c|section|sec\.?|part)\s*[0-9ivxlcdm]+$/i
+const CHAPTER_HEADING_LINE_REGEX = /^(?:\[?\s*)?(?:ch(?:ương|apter)?|ch\.)\s*([0-9]+)(?:\.[0-9]+)?(?:\s*\]?)*(?:(?:\s*[:\-–—\.]\s*|\s+)(.+))?$/i
+const GENERIC_GENRE_TOKENS = new Set([
+    "book",
+    "books",
+    "ebook",
+    "fiction",
+    "literature",
+    "novel",
+    "story",
+    "truyen",
+    "tiểu thuyết",
+])
+
+function isWeakTOCTitle(title: string): boolean {
+    const normalized = title.trim()
+    return (
+        SIMPLE_CHAPTER_TITLE_REGEX.test(normalized) ||
+        GENERIC_SECTION_TITLE_REGEX.test(normalized) ||
+        WEAK_CHAPTER_TOC_TITLE_REGEX.test(normalized)
+    )
+}
+
+function pickChapterHeadingFromContent(content: string): {
+    heading: string
+    chapterNumber: number | null
+    consumedLineIndexes: number[]
+} | null {
+    const lines = content.split(/\r?\n/)
+    const nonEmptyIndexes = lines
+        .map((line, index) => ({ line: line.trim(), index }))
+        .filter((item) => item.line.length > 0)
+
+    for (let i = 0; i < nonEmptyIndexes.length && i < 12; i++) {
+        const current = nonEmptyIndexes[i]
+        const headingLine = current.line.replace(/\s+/g, " ").trim()
+
+        if (!headingLine || headingLine.length > 180) continue
+        if (NOISE_TITLE_REGEX.test(headingLine) || isVolumeHeading(headingLine)) continue
+
+        const matched = headingLine.match(CHAPTER_HEADING_LINE_REGEX)
+        if (!matched) continue
+
+        const parsed = Number(matched[1])
+        const chapterNumber = Number.isInteger(parsed) && parsed > 0 && parsed <= 50000 ? parsed : null
+        const consumedLineIndexes = [current.index]
+
+        let heading = headingLine
+        const trailingTitle = (matched[2] || "").trim()
+        if (!trailingTitle) {
+            const next = nonEmptyIndexes[i + 1]
+            if (next) {
+                const subtitle = next.line.replace(/\s+/g, " ").trim()
+                if (
+                    subtitle.length > 0 &&
+                    subtitle.length <= 120 &&
+                    !NOISE_TITLE_REGEX.test(subtitle) &&
+                    !isVolumeHeading(subtitle) &&
+                    !CHAPTER_HEADING_LINE_REGEX.test(subtitle)
+                ) {
+                    heading = `${headingLine.replace(/[:\-–—\.\s]+$/g, "")}: ${subtitle}`
+                    consumedLineIndexes.push(next.index)
+                }
+            }
+        }
+
+        return { heading, chapterNumber, consumedLineIndexes }
+    }
+
+    return null
+}
+
 function normalizeMetaText(value: any, fallback: string) {
     if (typeof value === "string" && value.trim().length > 0) return value.trim()
     if (Array.isArray(value)) {
@@ -53,6 +128,146 @@ function normalizeMetaText(value: any, fallback: string) {
         if (first) return first.trim()
     }
     return fallback
+}
+
+function canReplaceNovelByRole(userRole: UserRole, userId: string, novel: { uploaderId: string | null }): boolean {
+    if (userRole === "ADMIN") return true
+    return novel.uploaderId === userId || novel.uploaderId === null
+}
+
+function collectTextValues(input: any, bucket: string[]) {
+    if (input === null || input === undefined) return
+
+    if (typeof input === "string") {
+        bucket.push(input)
+        return
+    }
+
+    if (typeof input === "number" || typeof input === "boolean") {
+        bucket.push(String(input))
+        return
+    }
+
+    if (Array.isArray(input)) {
+        input.forEach((item) => collectTextValues(item, bucket))
+        return
+    }
+
+    if (typeof input === "object") {
+        Object.values(input).forEach((value) => collectTextValues(value, bucket))
+    }
+}
+
+function normalizeGenreCandidate(name: string): string {
+    return name
+        .replace(/\s+/g, " ")
+        .replace(/^[\s\-–—:;,.\/|]+|[\s\-–—:;,.\/|]+$/g, "")
+        .trim()
+}
+
+function extractGenreCandidatesFromMetadata(metadata: any): string[] {
+    if (!metadata || typeof metadata !== "object") return []
+
+    const rawValues: string[] = []
+    const keys = Object.keys(metadata)
+    const candidateKeys = keys.filter((key) => /subject|genre|tag|category/i.test(key))
+
+    for (const key of candidateKeys) {
+        collectTextValues((metadata as Record<string, any>)[key], rawValues)
+    }
+
+    const uniqueNames: string[] = []
+    const seen = new Set<string>()
+
+    for (const raw of rawValues) {
+        const chunks = raw
+            .split(/[,;|/\n]+/)
+            .map((chunk) => normalizeGenreCandidate(chunk))
+            .filter(Boolean)
+
+        for (const name of chunks) {
+            const normalized = name.toLowerCase()
+            if (name.length < 2 || name.length > 80) continue
+            if (GENERIC_GENRE_TOKENS.has(normalized)) continue
+            if (seen.has(normalized)) continue
+
+            seen.add(normalized)
+            uniqueNames.push(name)
+
+            if (uniqueNames.length >= 12) {
+                return uniqueNames
+            }
+        }
+    }
+
+    return uniqueNames
+}
+
+async function resolveGenreIdsFromNames(genreNames: string[], createIfMissing: boolean): Promise<string[]> {
+    const ids: string[] = []
+
+    for (const genreName of genreNames) {
+        const existing = await prisma.genre.findFirst({
+            where: { name: { equals: genreName, mode: "insensitive" } },
+            select: { id: true },
+        })
+
+        if (existing) {
+            ids.push(existing.id)
+            continue
+        }
+
+        if (!createIfMissing) continue
+
+        const baseSlug = slugify(genreName) || `genre-${Date.now()}`
+        let slug = baseSlug
+        let counter = 1
+
+        while (await prisma.genre.findUnique({ where: { slug } })) {
+            slug = `${baseSlug}-${counter}`
+            counter += 1
+        }
+
+        try {
+            const created = await prisma.genre.create({
+                data: {
+                    name: genreName,
+                    slug,
+                },
+                select: { id: true },
+            })
+            ids.push(created.id)
+        } catch (error: any) {
+            if (error?.code === "P2002") {
+                const fallback = await prisma.genre.findFirst({
+                    where: { name: { equals: genreName, mode: "insensitive" } },
+                    select: { id: true },
+                })
+                if (fallback) {
+                    ids.push(fallback.id)
+                    continue
+                }
+            }
+
+            throw error
+        }
+    }
+
+    return Array.from(new Set(ids))
+}
+
+async function findNovelByTitleInsensitive(title: string) {
+    return prisma.novel.findFirst({
+        where: { title: { equals: title, mode: "insensitive" } },
+        orderBy: { updatedAt: "desc" },
+        select: {
+            id: true,
+            title: true,
+            slug: true,
+            coverUrl: true,
+            uploaderId: true,
+        },
+    })
 }
 
 function extractVolumeNumber(title: string): number | null {
@@ -78,20 +293,69 @@ function extractStrictChapterNumber(title: string): number | null {
     return number
 }
 
-function enhanceChapterTitleFromContent(title: string, content: string): { title: string; content: string } {
+function enhanceChapterTitleFromContent(title: string, content: string): { title: string; content: string; detectedChapterNumber: number | null } {
     const lines = content.split(/\r?\n/)
     const firstNonEmptyLineIndex = lines.findIndex((line) => line.trim().length > 0)
-    if (firstNonEmptyLineIndex < 0) return { title, content }
+    const baseTitle = title.trim()
+    const baseDetectedChapterNumber = extractStrictChapterNumber(baseTitle)
+    if (firstNonEmptyLineIndex < 0) {
+        return {
+            title,
+            content,
+            detectedChapterNumber: baseDetectedChapterNumber,
+        }
+    }
 
     const firstLineRaw = lines[firstNonEmptyLineIndex]
     const firstLine = firstLineRaw.trim()
-    if (!firstLine || firstLine.length > 140) return { title, content }
+    if (!firstLine) {
+        return {
+            title,
+            content,
+            detectedChapterNumber: baseDetectedChapterNumber,
+        }
+    }
 
-    const baseTitle = title.trim()
+    const detectedHeading = pickChapterHeadingFromContent(content)
+    if (detectedHeading) {
+        const shouldUseDetectedHeading =
+            isWeakTOCTitle(baseTitle) ||
+            baseDetectedChapterNumber === null ||
+            detectedHeading.chapterNumber === baseDetectedChapterNumber
+
+        if (shouldUseDetectedHeading) {
+            const nextLines = [...lines]
+            detectedHeading.consumedLineIndexes
+                .sort((a, b) => b - a)
+                .forEach((index) => {
+                    nextLines.splice(index, 1)
+                })
+
+            const nextContent = nextLines.join("\n").trim()
+            return {
+                title: detectedHeading.heading,
+                content: nextContent.length > 0 ? nextContent : content,
+                detectedChapterNumber: detectedHeading.chapterNumber,
+            }
+        }
+    }
+
+    if (firstLine.length > 140) {
+        return {
+            title,
+            content,
+            detectedChapterNumber: baseDetectedChapterNumber,
+        }
+    }
+
     const isSimpleBaseTitle = SIMPLE_CHAPTER_TITLE_REGEX.test(baseTitle)
 
     if (!isSimpleBaseTitle) {
-        return { title, content }
+        return {
+            title,
+            content,
+            detectedChapterNumber: baseDetectedChapterNumber,
+        }
     }
 
     let nextTitle = baseTitle
@@ -103,7 +367,11 @@ function enhanceChapterTitleFromContent(title: string, content: string): { title
         // Case 2: TOC title is only "Chương N", subtitle is on next line.
         nextTitle = `${baseTitle.replace(/[:\s]+$/g, "")}: ${firstLine}`
     } else {
-        return { title, content }
+        return {
+            title,
+            content,
+            detectedChapterNumber: baseDetectedChapterNumber,
+        }
     }
 
     const newLines = [...lines]
@@ -113,6 +381,7 @@ function enhanceChapterTitleFromContent(title: string, content: string): { title
     return {
         title: nextTitle,
         content: nextContent.length > 0 ? nextContent : content,
+        detectedChapterNumber: extractStrictChapterNumber(nextTitle) ?? baseDetectedChapterNumber,
     }
 }
 
@@ -330,10 +599,11 @@ function buildChaptersFromTOCSections(sections: EpubSection[]): ParsedChapter[] 
             }
         }
 
+        const enhanced = enhanceChapterTitleFromContent(cleanTitle, cleanContent)
         let volumeChapterNumber: number | null = null
-        const detectedChapterNumber = extractStrictChapterNumber(cleanTitle)
+        const detectedChapterNumber = enhanced.detectedChapterNumber
         if (currentVolumeNumber !== null) {
-            const explicitChapter = extractChapterNumber(cleanTitle)
+            const explicitChapter = extractChapterNumber(enhanced.title)
             if (explicitChapter !== null) {
                 currentVolumeChapterCounter = explicitChapter
             } else {
@@ -341,8 +611,6 @@ function buildChaptersFromTOCSections(sections: EpubSection[]): ParsedChapter[] 
             }
             volumeChapterNumber = currentVolumeChapterCounter
         }
-
-        const enhanced = enhanceChapterTitleFromContent(cleanTitle, cleanContent)
 
         chapters.push({
             title: enhanced.title,
@@ -414,13 +682,30 @@ function withMissingChapterPlaceholders(chapters: ParsedChapter[]): {
 
     for (const chapter of chapters) {
         const detected = chapter.detectedChapterNumber
-        const canUseDetected =
-            typeof detected === "number" &&
-            detected > currentNumber &&
-            detected - currentNumber <= MAX_ALLOWED_GAP
+        const detectedNumber = typeof detected === "number" ? detected : null
+        let canUseDetected =
+            detectedNumber !== null &&
+            detectedNumber > currentNumber &&
+            detectedNumber - currentNumber <= MAX_ALLOWED_GAP
 
-        if (canUseDetected) {
-            for (let missing = currentNumber + 1; missing < detected; missing++) {
+        // Recover from noisy leading TOC entries such as "Mục 1" that shift numbering.
+        if (!canUseDetected && detectedNumber !== null && detectedNumber > 0 && detectedNumber <= currentNumber) {
+            while (
+                normalized.length > 0 &&
+                detectedNumber <= currentNumber &&
+                normalized[normalized.length - 1].detectedChapterNumber === null &&
+                !normalized[normalized.length - 1].isPlaceholder &&
+                isWeakTOCTitle(normalized[normalized.length - 1].title)
+            ) {
+                normalized.pop()
+                currentNumber = Math.max(0, currentNumber - 1)
+            }
+
+            canUseDetected = detectedNumber > currentNumber && detectedNumber - currentNumber <= MAX_ALLOWED_GAP
+        }
+
+        if (canUseDetected && detectedNumber !== null) {
+            for (let missing = currentNumber + 1; missing < detectedNumber; missing++) {
                 insertedCount += 1
                 normalized.push({
                     title: `Chương ${missing} (Thiếu)`,
@@ -435,7 +720,7 @@ function withMissingChapterPlaceholders(chapters: ParsedChapter[]): {
             }
 
             detectedNumberAssignments += 1
-            currentNumber = detected
+            currentNumber = detectedNumber
             normalized.push({
                 ...chapter,
                 finalNumber: currentNumber,
@@ -608,6 +893,7 @@ export async function POST(req: Request) {
         const seriesMode = normalizeSeriesMode(formData.get("seriesMode"))
         const seriesIdInput = readFormText(formData, "seriesId")
         const seriesNameInput = readFormText(formData, "seriesName")
+        const replaceExisting = String(formData.get("replaceExisting") || "").toLowerCase() === "true"
 
         if (!epubFile) {
             return NextResponse.json({ error: "Thiếu file EPUB" }, { status: 400 })
@@ -687,10 +973,12 @@ export async function POST(req: Request) {
         const metadataAuthor = normalizeMetaText(metadata?.creator, "Khuyết danh")
         const metadataDescRaw = normalizeMetaText(metadata?.description, "Chưa có giới thiệu")
         const metadataDesc = convert(metadataDescRaw, { wordwrap: false })
+        const detectedGenreNames = extractGenreCandidatesFromMetadata(metadata)
 
         const novelTitle = normalizeMetaText(readFormText(formData, "title"), metadataTitle)
         const novelAuthor = normalizeMetaText(readFormText(formData, "authorName"), metadataAuthor)
         const novelDesc = normalizeMetaText(readFormText(formData, "description"), metadataDesc)
+        const importDefaultStatus = "Hoàn thành"
 
         const hasDetectedVolumes = chapters.some((ch: any) => ch.volumeNumber !== null)
 
@@ -706,6 +994,7 @@ export async function POST(req: Request) {
                     title: novelTitle,
                     authorName: novelAuthor,
                     description: novelDesc,
+                    detectedGenres: detectedGenreNames,
                     totalChapters: chapters.length,
                 },
                 chaptersPreview: chapters.slice(0, 20).map((ch: any, i: number) => ({
@@ -720,6 +1009,39 @@ export async function POST(req: Request) {
             })
         }
 
+        const duplicatedNovel = await findNovelByTitleInsensitive(novelTitle)
+        const canReplaceDuplicated = duplicatedNovel
+            ? canReplaceNovelByRole(session.user.role as UserRole, session.user.id, duplicatedNovel)
+            : false
+
+        if (duplicatedNovel && !replaceExisting) {
+            return NextResponse.json({
+                code: "DUPLICATE_TITLE",
+                error: `Truyện \"${duplicatedNovel.title}\" đã tồn tại`,
+                canReplace: canReplaceDuplicated,
+                existingNovel: {
+                    id: duplicatedNovel.id,
+                    title: duplicatedNovel.title,
+                    slug: duplicatedNovel.slug,
+                },
+            }, { status: 409 })
+        }
+
+        if (duplicatedNovel && replaceExisting && !canReplaceDuplicated) {
+            return NextResponse.json({
+                code: "DUPLICATE_TITLE",
+                error: "Bạn không có quyền replace truyện đã tồn tại",
+                canReplace: false,
+                existingNovel: {
+                    id: duplicatedNovel.id,
+                    title: duplicatedNovel.title,
+                    slug: duplicatedNovel.slug,
+                },
+            }, { status: 403 })
+        }
+
+        const resolvedGenreIds = await resolveGenreIdsFromNames(detectedGenreNames, true)
+
         const selectedSeriesId = await resolveSeriesIdForEpubImport({
             mode: seriesMode,
             seriesId: seriesIdInput,
@@ -728,55 +1050,123 @@ export async function POST(req: Request) {
             userId: session.user.id,
         })
 
-        // Generate base slug
-        const baseSlug = slugify(novelTitle)
-
-        let slug = baseSlug
-        let slugCounter = 1
-
-        // Đảm bảo slug là duy nhất
-        while (await prisma.novel.findUnique({ where: { slug } })) {
-            slug = `${baseSlug}-${slugCounter}`
-            slugCounter++
-        }
-
         const coverUrl = await saveCoverBufferToR2(cover)
 
-        const newNovel = await prisma.novel.create({
-            data: {
+        let targetNovelId = duplicatedNovel?.id || ""
+        let responseStatus = 201
+        let replaced = false
+
+        if (duplicatedNovel && replaceExisting) {
+            const updatedNovel = await prisma.$transaction(async (tx) => {
+                await tx.novel.update({
+                    where: { id: duplicatedNovel.id },
+                    data: {
+                        title: novelTitle,
+                        authorName: novelAuthor,
+                        description: novelDesc,
+                        status: importDefaultStatus,
+                        coverUrl,
+                        seriesId: selectedSeriesId,
+                        totalChapters: chapters.length,
+                        ...(session.user.role === "MOD" ? { uploaderId: session.user.id } : {}),
+                    },
+                })
+
+                await tx.novelGenre.deleteMany({
+                    where: { novelId: duplicatedNovel.id },
+                })
+
+                if (resolvedGenreIds.length > 0) {
+                    await tx.novelGenre.createMany({
+                        data: resolvedGenreIds.map((genreId) => ({
+                            novelId: duplicatedNovel.id,
+                            genreId,
+                        })),
+                        skipDuplicates: true,
+                    })
+                }
+
+                return tx.novel.findUnique({ where: { id: duplicatedNovel.id } })
+            })
+
+            if (!updatedNovel) {
+                throw new Error("Không thể replace truyện đã tồn tại")
+            }
+
+            targetNovelId = updatedNovel.id
+            responseStatus = 200
+            replaced = true
+
+            if (duplicatedNovel.coverUrl && duplicatedNovel.coverUrl !== coverUrl) {
+                await deleteR2ObjectByUrl(duplicatedNovel.coverUrl).catch(() => { })
+            }
+        } else {
+            // Generate base slug
+            const baseSlug = slugify(novelTitle)
+            let slug = baseSlug
+            let slugCounter = 1
+
+            // Đảm bảo slug là duy nhất
+            while (await prisma.novel.findUnique({ where: { slug } })) {
+                slug = `${baseSlug}-${slugCounter}`
+                slugCounter++
+            }
+
+            const createData: any = {
                 title: novelTitle,
-                slug: slug,
+                slug,
                 authorName: novelAuthor,
                 description: novelDesc,
+                status: importDefaultStatus,
                 coverUrl,
                 seriesId: selectedSeriesId,
                 uploaderId: session.user.id,
                 totalChapters: chapters.length,
-            },
-        })
+            }
+
+            if (resolvedGenreIds.length > 0) {
+                createData.genres = {
+                    create: resolvedGenreIds.map((genreId) => ({
+                        genre: { connect: { id: genreId } },
+                    })),
+                }
+            }
+
+            const createdNovel = await prisma.novel.create({ data: createData })
+            targetNovelId = createdNovel.id
+        }
 
         // Lưu chapters xuống MongoDB
         await connectToMongoDB()
+        await Chapter.deleteMany({ novelId: targetNovelId })
+
         const chapterDocs = chapters.map((ch: any, i: number) => ({
-            novelId: newNovel.id,
+            novelId: targetNovelId,
             number: ch.finalNumber || (i + 1),
             volumeNumber: ch.volumeNumber ?? null,
             volumeTitle: ch.volumeTitle ?? null,
             volumeChapterNumber: ch.volumeChapterNumber ?? null,
             title: ch.title,
             content: ch.content,
-            views: 0
+            views: 0,
         }))
 
         if (chapterDocs.length > 0) {
             await Chapter.insertMany(chapterDocs)
         }
 
+        const novelAfterWrite = await prisma.novel.findUnique({ where: { id: targetNovelId } })
+        if (!novelAfterWrite) {
+            throw new Error("Không thể tải lại thông tin truyện sau khi import")
+        }
+
         return NextResponse.json({
-            ...newNovel,
+            ...novelAfterWrite,
             parserInfo,
             hasCoverFromEpub: !!coverUrl,
-        }, { status: 201 })
+            detectedGenres: detectedGenreNames,
+            replaced,
+        }, { status: responseStatus })
     } catch (error: any) {
         console.error("EPUB upload error:", error)
         return NextResponse.json({ error: "Lỗi xử lý file EPUB", details: error.message }, { status: 500 })

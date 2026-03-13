@@ -90,9 +90,25 @@ model Novel {
   genres        NovelGenre[]
   comments      Comment[]
   bookmarks     Bookmark[]
+  dailyViews    NovelViewDaily[]
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model NovelViewDaily {
+  id        String   @id @default(cuid())
+  novelId   String
+  day       DateTime @db.Date
+  views     Int      @default(0)
+
+  novel     Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([novelId, day])
+  @@index([day])
 }
 
 model Series {
