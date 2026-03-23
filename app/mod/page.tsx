@@ -1,6 +1,8 @@
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import Link from "next/link"
+import { Sparkles } from "lucide-react"
 
 export default async function ModDashboardPage() {
     const session = await getServerSession(authOptions)
@@ -64,6 +66,22 @@ export default async function ModDashboardPage() {
                     <h3 className="font-semibold text-lg">Tổng series</h3>
                     <p className="text-3xl font-bold mt-2">{seriesCount}</p>
                 </div>
+            </div>
+
+            <div className="mt-6 rounded-xl border bg-card text-card-foreground shadow p-6">
+                <h3 className="font-semibold text-lg flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    AI Tool
+                </h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                    Công cụ AI hỗ trợ tìm kiếm và tự bổ sung thông tin truyện vào form quản lý.
+                </p>
+                <Link
+                    href="/mod/ai-tool"
+                    className="mt-4 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+                >
+                    Mở AI Tool
+                </Link>
             </div>
         </div>
     )

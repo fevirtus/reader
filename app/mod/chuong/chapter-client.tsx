@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, Suspense, useRef } from "react"
+import { useState, useEffect, Suspense, useRef, Fragment } from "react"
 import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,11 +15,33 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FileText, Loader2, Plus, ArrowLeft, Wand2, Edit, Trash2, Upload, Search } from "lucide-react"
+import { FileText, Loader2, Plus, ArrowLeft, Wand2, Edit, Trash2, Upload, Search, BookOpen } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Label } from "@/components/ui/label"
+import { Progress } from "@/components/ui/progress"
 // @ts-ignore
 import * as mammoth from "mammoth"
+
+const CHAPTER_REGEX_PRESETS = [
+    {
+        id: "vi_chuong_hoi",
+        name: "VN - Chương/Hồi/Tiết/Phần 1: ...",
+        pattern: "^(?:Chương|Hồi|Tiết|Phần|Thứ|Quyển|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+    },
+    {
+        id: "mix_chapter",
+        name: "Mixed - Chương/Hồi/Chapter...",
+        pattern: "^(?:Chương|Hồi|Tiết|Phần|Thứ|Quyển|Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+    },
+    {
+        id: "numeric_only",
+        name: "Chỉ có số (1. ...)",
+        pattern: "^\\d+(?:\\.\\d+)?\\s*[\\.\\:\\-\\]\\)]?(?:\\s+|$)[^\\n]*$",
+    },
+]
 
 interface Chapter {
     _id: string
@@ -30,6 +52,33 @@ interface Chapter {
     title: string
     views: number
     createdAt: string
+}
+
+interface EpubPreviewData {
+    preview: true
+    fileName: string
+    splitMode: "toc" | "regex"
+    detectedStructureType: "light_novel" | "standard"
+    parserInfo?: {
+        splitMode: string
+        chapterRegexUsed?: string
+        regexPreset?: string
+        sourceSections: number
+        chaptersDetected: number
+        chaptersFinal: number
+        insertedMissingChapters: number
+        detectedMaxChapterNumber: number
+        detectedNumberAssignments: number
+    }
+    chaptersPreview: Array<{
+        number: number
+        title: string
+        isPlaceholder: boolean
+        volumeNumber?: number
+        volumeTitle?: string
+        volumeChapterNumber?: number
+        excerpt: string
+    }>
 }
 
 const generatePagination = (currentPage: number, totalPages: number) => {
@@ -77,7 +126,10 @@ function ChapterManager() {
     // Delete states
     const [openDelete, setOpenDelete] = useState(false)
     const [deletingChapterId, setDeletingChapterId] = useState<string | null>(null)
-
+    const [openBulkDelete, setOpenBulkDelete] = useState(false)
+    const [bulkDeleteFrom, setBulkDeleteFrom] = useState("")
+    const [bulkDeleteTo, setBulkDeleteTo] = useState("")
+    const [bulkDeleting, setBulkDeleting] = useState(false)
 
     // Form states
     const [number, setNumber] = useState("")
@@ -92,6 +144,135 @@ function ChapterManager() {
     const [uploadingMulti, setUploadingMulti] = useState(false)
     const [uploadProgress, setUploadProgress] = useState(0)
     const [totalUpload, setTotalUpload] = useState(0)
+
+    // EPUB append states
+    const [openEpubAppend, setOpenEpubAppend] = useState(false)
+    const [epubFile, setEpubFile] = useState<File | null>(null)
+    const epubInputRef = useRef<HTMLInputElement>(null)
+    const [epubSplitMode, setEpubSplitMode] = useState<"toc" | "regex">("regex")
+    const [epubRegexPreset, setEpubRegexPreset] = useState("vi_chuong_hoi")
+    const [epubCustomRegex, setEpubCustomRegex] = useState("")
+    const [appendingEpub, setAppendingEpub] = useState(false)
+    const [epubPreviewData, setEpubPreviewData] = useState<EpubPreviewData | null>(null)
+
+    const getEpubSourceRegex = () => {
+        if (epubRegexPreset === "custom") {
+            return epubCustomRegex.trim()
+        }
+        return CHAPTER_REGEX_PRESETS.find((preset) => preset.id === epubRegexPreset)?.pattern || CHAPTER_REGEX_PRESETS[0].pattern
+    }
+
+    const handleEpubAppendPreview = async () => {
+        if (!epubFile || !novelId) return
+
+        setAppendingEpub(true)
+        setEpubPreviewData(null)
+        const toastId = toast.loading("Đang đọc và phân tích EPUB...")
+
+        try {
+            const formData = new FormData()
+            formData.append("file", epubFile)
+            formData.append("title", "Append Ebook")
+            formData.append("splitMode", epubSplitMode)
+            formData.append("chapterRegex", epubSplitMode === "regex" ? getEpubSourceRegex() : "")
+            formData.append("chapterRegexPreset", epubRegexPreset)
+            formData.append("appendTargetNovelId", novelId)
+            formData.append("preview", "true")
+
+            const xhr = new XMLHttpRequest()
+            const result = await new Promise<{ status: number; ok: boolean; data: any }>((resolve, reject) => {
+                xhr.open("POST", "/api/mod/epub")
+                xhr.timeout = 250000 
+                xhr.onload = () => resolve({ status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300, data: JSON.parse(xhr.responseText || "{}") })
+                xhr.onerror = () => reject(new Error("Lỗi mạng khi phân tích EPUB"))
+                xhr.ontimeout = () => reject(new Error("Quá thời gian chờ khi xử lý EPUB"))
+                xhr.send(formData)
+            })
+
+            if (!result.ok) {
+                throw new Error(result.data.error || "Phân tích EPUB thất bại")
+            }
+
+            setEpubPreviewData(result.data)
+            toast.success("Phân tích thành công. Vui lòng kiểm tra lại trước khi chèn.", { id: toastId })
+        } catch (error: any) {
+            console.error(error)
+            toast.error(error.message || "Lỗi khi phân tích file EPUB", { id: toastId })
+        } finally {
+            setAppendingEpub(false)
+        }
+    }
+
+    const handleEpubAppendSubmit = async () => {
+        if (!epubFile || !novelId) return
+
+        setAppendingEpub(true)
+        const toastId = toast.loading("Đang đọc và tách chương từ EPUB...")
+
+        try {
+            const formData = new FormData()
+            formData.append("file", epubFile)
+            formData.append("title", "Append Ebook")
+            formData.append("splitMode", epubSplitMode)
+            formData.append("chapterRegex", epubSplitMode === "regex" ? getEpubSourceRegex() : "")
+            formData.append("chapterRegexPreset", epubRegexPreset)
+            formData.append("appendTargetNovelId", novelId)
+
+            const xhr = new XMLHttpRequest()
+            const result = await new Promise<{ status: number; ok: boolean; data: any }>((resolve, reject) => {
+                xhr.open("POST", "/api/mod/epub")
+                xhr.timeout = 250000 
+                xhr.onload = () => resolve({ status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300, data: JSON.parse(xhr.responseText || "{}") })
+                xhr.onerror = () => reject(new Error("Lỗi mạng khi upload EPUB"))
+                xhr.ontimeout = () => reject(new Error("Quá thời gian chờ khi xử lý EPUB"))
+                xhr.send(formData)
+            })
+
+            if (!result.ok) {
+                throw new Error(result.data.error || "Nhập EPUB thất bại")
+            }
+
+            toast.success(`Nhập EPUB thành công! Đã chêm thêm ${result.data.parserInfo?.chaptersFinal || result.data.totalChapters} chương.`, { id: toastId })
+            setEpubPreviewData(null)
+            setOpenEpubAppend(false)
+            setEpubFile(null)
+            fetchChapters()
+        } catch (error: any) {
+            toast.error(error.message, { id: toastId })
+        } finally {
+            setAppendingEpub(false)
+            if (epubInputRef.current) epubInputRef.current.value = ""
+        }
+    }
+
+    const handleBulkDeleteSubmit = async () => {
+        if (!bulkDeleteFrom || !bulkDeleteTo || !novelId) return
+        setBulkDeleting(true)
+        const toastId = toast.loading("Đang xóa hàng loạt chương...")
+        try {
+            const res = await fetch("/api/mod/chuong/bulk-delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    novelId,
+                    fromNumber: Number(bulkDeleteFrom),
+                    toNumber: Number(bulkDeleteTo)
+                })
+            })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error || "Xóa thất bại")
+            
+            toast.success(`Đã xóa thành công ${data.deletedCount} chương!`, { id: toastId })
+            setOpenBulkDelete(false)
+            setBulkDeleteFrom("")
+            setBulkDeleteTo("")
+            fetchChapters()
+        } catch (error: any) {
+            toast.error(error.message, { id: toastId })
+        } finally {
+            setBulkDeleting(false)
+        }
+    }
 
     const fetchChapters = async (pageToFetch = 1) => {
         if (!novelId) return
@@ -397,6 +578,164 @@ function ChapterManager() {
                         <Wand2 className="h-4 w-4" /> Tối ưu hóa
                     </Button>
 
+                    <Button variant="destructive" className="gap-2" onClick={() => setOpenBulkDelete(true)} disabled={chapters.length === 0}>
+                        <Trash2 className="h-4 w-4" /> Xóa theo khoảng
+                    </Button>
+
+                    <input 
+                        type="file" 
+                        ref={epubInputRef} 
+                        onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            if (file) {
+                                setEpubPreviewData(null)
+                                setEpubSplitMode("regex")
+                                setEpubFile(file)
+                                setOpenEpubAppend(true)
+                            }
+                            if (e.target) e.target.value = ""
+                        }} 
+                        accept=".epub" 
+                        className="hidden" 
+                    />
+                    <Button variant="secondary" className="gap-2" onClick={() => epubInputRef.current?.click()}>
+                        <BookOpen className="h-4 w-4" /> Nhập từ EPUB
+                    </Button>
+
+                    <Dialog open={openEpubAppend} onOpenChange={(val) => {
+                        setOpenEpubAppend(val)
+                        if (!val) {
+                            setEpubPreviewData(null)
+                            if (epubInputRef.current) epubInputRef.current.value = ""
+                        }
+                    }}>
+                        <DialogContent className="sm:max-w-[750px] max-h-[90vh] flex flex-col">
+                            <DialogHeader>
+                                <DialogTitle>Bổ sung chương từ file EPUB</DialogTitle>
+                                <DialogDescription>
+                                    Đọc và trích xuất hàng loạt chương từ file EPUB vào truyện này.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-6 pt-4 flex-1 overflow-y-auto pr-2 pb-4">
+                                <div className="space-y-2 rounded-md border p-4 bg-muted/50">
+                                    <h3 className="font-semibold text-sm">Chế độ ghi đè thông minh (Smart Merge Overwrite)</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Hệ thống sẽ tự động ghép nối các dải chương. Những chương thiếu sẽ được điền khuyết (Insert), những chương mới sẽ được chêm vào. Các chương có cùng số thứ tự sẽ bị <strong>Ghi đè</strong> bằng nội dung lấy từ EPUB để đảm bảo độ chính xác.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <h3 className="font-semibold text-sm border-b pb-2">Giải Thuật Tách Chương</h3>
+                                    <div className="flex items-center gap-4">
+                                        <Label className="w-1/4">Phiên bản Text</Label>
+                                        <RadioGroup value={epubSplitMode} onValueChange={(v: "toc" | "regex") => {
+                                            setEpubSplitMode(v)
+                                            setEpubPreviewData(null)
+                                        }} className="flex items-center gap-4">
+                                            <div className="flex items-center space-x-2">
+                                                <RadioGroupItem value="toc" id="toc_mode_a" />
+                                                <Label htmlFor="toc_mode_a" className="cursor-pointer font-normal">Mục lục (TOC)</Label>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <RadioGroupItem value="regex" id="regex_mode_a" />
+                                                <Label htmlFor="regex_mode_a" className="cursor-pointer font-normal">Quy tắc (Regex)</Label>
+                                            </div>
+                                        </RadioGroup>
+                                    </div>
+                                    
+                                    {epubSplitMode === "regex" && (
+                                        <div className="space-y-3 pt-2">
+                                            <div className="flex flex-col gap-2">
+                                                <Label>Mẫu Regex có sẵn</Label>
+                                                <Select value={epubRegexPreset} onValueChange={(v) => {
+                                                    setEpubRegexPreset(v)
+                                                    setEpubPreviewData(null)
+                                                }}>
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {CHAPTER_REGEX_PRESETS.map((preset) => (
+                                                            <SelectItem key={preset.id} value={preset.id}>
+                                                                {preset.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                        <SelectItem value="custom">Nâng cao (Tùy chỉnh Regex)...</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            {epubRegexPreset === "custom" && (
+                                                <div className="flex flex-col gap-2">
+                                                    <Label>Regex Tùy Chỉnh</Label>
+                                                    <Input
+                                                        value={epubCustomRegex}
+                                                        onChange={(e) => {
+                                                            setEpubCustomRegex(e.target.value)
+                                                            setEpubPreviewData(null)
+                                                        }}
+                                                        placeholder="Vd: /^(Chương|Hồi) \d+/gm"
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {epubPreviewData && epubPreviewData.parserInfo && (
+                                    <div className="space-y-4 border-t pt-4">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h3 className="font-semibold text-sm">Kết quả trích xuất dự kiến (30 mục đầu)</h3>
+                                            <div className="text-xs space-y-1 text-right">
+                                                <p><span className="text-muted-foreground">Flow file HTML:</span> {epubPreviewData.parserInfo.sourceSections}</p>
+                                                <p><span className="text-muted-foreground">Phát hiện:</span> {epubPreviewData.parserInfo.chaptersDetected} chương</p>
+                                            </div>
+                                        </div>
+
+                                        {epubPreviewData.chaptersPreview.length === 0 ? (
+                                            <div className="p-4 text-center border border-dashed rounded bg-muted/40 text-muted-foreground text-sm">
+                                                Không tách được chương nào. Xem lại Tùy chọn Tách / Mẫu Regex.
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-3 max-h-[300px] overflow-y-auto border rounded-md p-2 bg-card">
+                                                {epubPreviewData.chaptersPreview.map((chapter) => (
+                                                    <div key={`preview-${chapter.number}`} className="flex border rounded overflow-hidden shadow-sm text-sm">
+                                                        <div className="w-16 bg-muted border-r flex flex-col justify-center items-center shrink-0">
+                                                            <span className="text-xs text-muted-foreground">Ch.</span>
+                                                            <span className="font-semibold">{chapter.number}</span>
+                                                        </div>
+                                                        <div className="p-3 flex-1 min-w-0">
+                                                            <h4 className="font-semibold mb-1 truncate text-foreground flex items-center gap-2">
+                                                                {chapter.title} 
+                                                                {chapter.isPlaceholder && (
+                                                                    <span className="bg-destructive/10 text-destructive text-[10px] px-1.5 py-0.5 rounded uppercase font-bold">Lỗi tách chờ XL</span>
+                                                                )}
+                                                            </h4>
+                                                            <p className="text-xs text-muted-foreground line-clamp-2">{chapter.excerpt}</p>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            <DialogFooter className="mt-auto pt-4 border-t">
+                                <Button variant="outline" onClick={() => setOpenEpubAppend(false)} disabled={appendingEpub}>Huỷ</Button>
+                                {!epubPreviewData ? (
+                                    <Button onClick={handleEpubAppendPreview} disabled={appendingEpub}>
+                                        {appendingEpub && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Xem trước dữ liệu
+                                    </Button>
+                                ) : (
+                                    <Button onClick={handleEpubAppendSubmit} disabled={appendingEpub || epubPreviewData.chaptersPreview.length === 0}>
+                                        {appendingEpub && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Xác nhận ghi đè
+                                    </Button>
+                                )}
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
                     <input 
                         type="file" 
                         ref={fileInputRef} 
@@ -424,30 +763,34 @@ function ChapterManager() {
                                 </DialogDescription>
                             </DialogHeader>
                             <form onSubmit={handleAddSubmit} className="flex flex-col gap-4 pt-4 flex-1 h-full overflow-hidden">
-                                <div className="grid grid-cols-6 gap-4">
-                                    <div className="space-y-2 col-span-1">
-                                        <label className="text-sm font-medium">Chương số</label>
-                                        <Input type="number" value={number} onChange={(e) => setNumber(e.target.value)} required />
+                                <div className="grid grid-cols-6 gap-4 border-b pb-4">
+                                    <div className="space-y-2 col-span-2">
+                                        <label className="text-sm font-medium text-primary">Chương số</label>
+                                        <Input type="number" step="any" value={number} onChange={(e) => setNumber(e.target.value)} required />
                                     </div>
-                                    <div className="space-y-2 col-span-1">
-                                        <label className="text-sm font-medium">Quyển số</label>
-                                        <Input type="number" value={volumeNumber} onChange={(e) => setVolumeNumber(e.target.value)} placeholder="VD: 1" />
-                                    </div>
-                                    <div className="space-y-2 col-span-1">
-                                        <label className="text-sm font-medium">Chương trong quyển</label>
-                                        <Input type="number" value={volumeChapterNumber} onChange={(e) => setVolumeChapterNumber(e.target.value)} placeholder="VD: 5" />
-                                    </div>
-                                    <div className="space-y-2 col-span-3">
-                                        <label className="text-sm font-medium">Tên quyển (Tuỳ chọn)</label>
-                                        <Input value={volumeTitle} onChange={(e) => setVolumeTitle(e.target.value)} placeholder="VD: Quyển 1 - Khởi đầu" />
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-4 gap-4">
                                     <div className="space-y-2 col-span-4">
-                                        <label className="text-sm font-medium">Tên chương</label>
+                                        <label className="text-sm font-medium text-primary">Tên chương</label>
                                         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Thiếu niên kỳ bạt" required autoFocus />
                                     </div>
                                 </div>
+                                <details className="group border rounded-lg [&_summary::-webkit-details-marker]:hidden">
+                                    <summary className="flex cursor-pointer items-center justify-between px-4 py-2 bg-muted/30 font-medium">
+                                        <span className="text-sm">Tùy chọn nâng cao (Quyển / Tập)</span>
+                                        <span className="transition duration-300 group-open:-rotate-180">
+                                            <svg fill="none" height="18" shape-rendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="18"><path d="M6 9l6 6 6-6"></path></svg>
+                                        </span>
+                                    </summary>
+                                    <div className="grid grid-cols-6 gap-4 p-4 text-muted-foreground bg-card">
+                                        <div className="space-y-2 col-span-2">
+                                            <label className="text-xs font-medium">Quyển số</label>
+                                            <Input type="number" value={volumeNumber} onChange={(e) => setVolumeNumber(e.target.value)} placeholder="VD: 1" />
+                                        </div>
+                                        <div className="space-y-2 col-span-4">
+                                            <label className="text-xs font-medium">Tên quyển</label>
+                                            <Input value={volumeTitle} onChange={(e) => setVolumeTitle(e.target.value)} placeholder="VD: Khởi đầu mới" />
+                                        </div>
+                                    </div>
+                                </details>
                                 <div className="space-y-2 flex-1 flex flex-col h-full">
                                     <label className="text-sm font-medium">Nội dung văn bản (Hỗ trợ xuống dòng)</label>
                                     <Textarea
@@ -465,6 +808,38 @@ function ChapterManager() {
                                     </Button>
                                 </DialogFooter>
                             </form>
+                        </DialogContent>
+                    </Dialog>
+
+                    <Dialog open={openBulkDelete} onOpenChange={setOpenBulkDelete}>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle className="text-destructive flex items-center gap-2">
+                                    <Trash2 className="h-5 w-5" /> Xóa hàng loạt chương
+                                </DialogTitle>
+                                <DialogDescription>
+                                    Cẩn thận! Thao tác này sẽ xóa vĩnh viễn các chương nằm trong khoảng bạn chọn. Không thể khôi phục!
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4 py-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Từ chương số</Label>
+                                        <Input type="number" value={bulkDeleteFrom} onChange={(e) => setBulkDeleteFrom(e.target.value)} placeholder="Ví dụ: 10" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Đến chương số</Label>
+                                        <Input type="number" value={bulkDeleteTo} onChange={(e) => setBulkDeleteTo(e.target.value)} placeholder="Ví dụ: 20" />
+                                    </div>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setOpenBulkDelete(false)} disabled={bulkDeleting}>Huỷ</Button>
+                                <Button variant="destructive" onClick={handleBulkDeleteSubmit} disabled={bulkDeleting || !bulkDeleteFrom || !bulkDeleteTo}>
+                                    {bulkDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    Xác nhận Xóa
+                                </Button>
+                            </DialogFooter>
                         </DialogContent>
                     </Dialog>
 
@@ -577,7 +952,7 @@ function ChapterManager() {
             </div>
 
             <div className="rounded-xl border bg-card shadow-sm">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto overflow-y-hidden">
                     <table className="w-full text-sm text-left">
                         <thead className="text-xs uppercase bg-muted/50 text-muted-foreground border-b border-border">
                             <tr>
@@ -594,32 +969,59 @@ function ChapterManager() {
                             ) : chapters.length === 0 ? (
                                 <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Chưa có chương nào được đăng.</td></tr>
                             ) : (
-                                chapters.map((ch) => (
-                                    <tr key={ch._id} className="border-b border-border hover:bg-muted/30 transition-colors last:border-0">
-                                        <td className="px-5 py-4 font-medium text-foreground">Chương {ch.number}</td>
-                                        <td className="px-5 py-4 text-muted-foreground">
-                                            {ch.volumeNumber || ch.volumeTitle
-                                                ? `${ch.volumeTitle || `Quyển ${ch.volumeNumber}`}${ch.volumeChapterNumber ? ` · Ch.${ch.volumeChapterNumber}` : ""}`
-                                                : "-"}
-                                        </td>
-                                        <td className="px-5 py-4 text-muted-foreground">{ch.title}</td>
-                                        <td className="px-5 py-4 text-right">{ch.views}</td>
-                                        <td className="px-5 py-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <Link href={`/mod/chuong/${ch._id}`}>
-                                                    <Button size="sm" variant="outline" className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50">
-                                                        <Edit className="w-4 h-4 mr-1" /> Sửa
+                                chapters.map((ch, index) => (
+                                    <Fragment key={ch._id}>
+                                        <tr className="border-b border-border hover:bg-muted/30 transition-colors last:border-0 relative group">
+                                            <td className="px-5 py-4 font-medium text-foreground">Chương {ch.number}</td>
+                                            <td className="px-5 py-4 text-muted-foreground">
+                                                {ch.volumeNumber || ch.volumeTitle
+                                                    ? `${ch.volumeTitle || `Quyển ${ch.volumeNumber}`}${ch.volumeChapterNumber ? ` · Ch.${ch.volumeChapterNumber}` : ""}`
+                                                    : "-"}
+                                            </td>
+                                            <td className="px-5 py-4 text-muted-foreground">{ch.title}</td>
+                                            <td className="px-5 py-4 text-right">{ch.views}</td>
+                                            <td className="px-5 py-4 text-right">
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <Link href={`/mod/chuong/${ch._id}`}>
+                                                        <Button size="sm" variant="outline" className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+                                                            <Edit className="w-4 h-4 mr-1" /> Sửa
+                                                        </Button>
+                                                    </Link>
+                                                    <Button size="sm" variant="outline" className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => {
+                                                        setDeletingChapterId(ch._id)
+                                                        setOpenDelete(true)
+                                                    }}>
+                                                        <Trash2 className="w-4 h-4 mr-1" /> Xóa
                                                     </Button>
-                                                </Link>
-                                                <Button size="sm" variant="outline" className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => {
-                                                    setDeletingChapterId(ch._id)
-                                                    setOpenDelete(true)
-                                                }}>
-                                                    <Trash2 className="w-4 h-4 mr-1" /> Xóa
-                                                </Button>
-                                            </div>
-                                        </td>
-                                    </tr>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <tr className="group/insert">
+                                            <td colSpan={5} className="p-0 border-none relative">
+                                                <div className="h-2 flex items-center justify-center opacity-0 group-hover/insert:opacity-100 transition-opacity -my-1 z-10">
+                                                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-dashed border-primary/50"></div></div>
+                                                    <Button 
+                                                        size="sm" 
+                                                        variant="outline" 
+                                                        className="h-6 rounded-full px-2 text-primary relative z-20 bg-background hover:bg-primary hover:text-primary-foreground text-xs" 
+                                                        onClick={() => {
+                                                            const nextCh = chapters[index + 1]
+                                                            let suggestedNum = ch.number + 1 
+                                                            if (nextCh && nextCh.number <= ch.number + 1) {
+                                                                suggestedNum = Number((ch.number + 0.1).toFixed(2))
+                                                            }
+                                                            setNumber(suggestedNum.toString())
+                                                            setTitle("")
+                                                            setContent("")
+                                                            setOpenAdd(true)
+                                                        }}
+                                                    >
+                                                        <Plus className="w-3 h-3 mr-1" /> Chèn chương ở đây
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </Fragment>
                                 ))
                             )}
                         </tbody>

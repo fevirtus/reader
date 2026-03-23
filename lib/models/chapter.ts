@@ -25,5 +25,6 @@ const ChapterSchema: Schema = new Schema({
 })
 
 ChapterSchema.index({ novelId: 1, number: 1 }, { unique: true })
+ChapterSchema.index({ createdAt: -1, novelId: 1 })
 
 export const Chapter = mongoose.models.Chapter || mongoose.model<IChapter>("Chapter", ChapterSchema)

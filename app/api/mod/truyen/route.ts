@@ -148,6 +148,13 @@ export async function PUT(req: Request) {
     try {
         const data = await req.json()
         const { id, title, originalTitle, authorName, originalAuthorName, description, coverUrl, status, genreIds } = data
+
+        if (!id) {
+            return NextResponse.json({ error: "Thiếu ID truyện" }, { status: 400 })
+        }
+
+        const hasField = (field: string) => Object.prototype.hasOwnProperty.call(data, field)
+
         const targetNovel = await prisma.novel.findFirst({
             where: session.user.role === "ADMIN"
                 ? { id }
@@ -169,6 +176,18 @@ export async function PUT(req: Request) {
         const fixedSeriesId = targetNovel.seriesId
 
         if (fixedSeriesId) {
+            const sharedData: Record<string, unknown> = {}
+            if (hasField("originalTitle")) sharedData.originalTitle = originalTitle
+            if (hasField("authorName")) sharedData.authorName = authorName
+            if (hasField("originalAuthorName")) sharedData.originalAuthorName = originalAuthorName
+            if (hasField("description")) sharedData.description = description
+            if (hasField("status")) sharedData.status = status
+
+            const ownData: Record<string, unknown> = {}
+            if (hasField("title")) ownData.title = title
+            if (hasField("coverUrl")) ownData.coverUrl = coverUrl
+            if (session.user.role === "MOD") ownData.uploaderId = session.user.id
+
             const seriesNovels = await prisma.novel.findMany({
                 where: { seriesId: fixedSeriesId },
                 select: { id: true },
@@ -177,16 +196,12 @@ export async function PUT(req: Request) {
 
             const updatedNovel = await prisma.$transaction(async (tx) => {
                 // Sync shared metadata for all novels in the same series.
-                await tx.novel.updateMany({
-                    where: { id: { in: seriesNovelIds } },
-                    data: {
-                        originalTitle,
-                        authorName,
-                        originalAuthorName,
-                        description,
-                        status,
-                    },
-                })
+                if (Object.keys(sharedData).length > 0) {
+                    await tx.novel.updateMany({
+                        where: { id: { in: seriesNovelIds } },
+                        data: sharedData,
+                    })
+                }
 
                 if (genreIds !== undefined) {
                     await tx.novelGenre.deleteMany({
@@ -203,31 +218,36 @@ export async function PUT(req: Request) {
                 }
 
                 // Only current novel keeps its own title and cover.
+                if (Object.keys(ownData).length === 0) {
+                    return tx.novel.findUnique({ where: { id } })
+                }
+
                 return tx.novel.update({
                     where: { id },
-                    data: {
-                        title,
-                        coverUrl,
-                        ...(session.user.role === "MOD" && { uploaderId: session.user.id }),
-                    },
+                    data: ownData,
                 })
             })
 
             return NextResponse.json(updatedNovel)
         }
 
+        const updateData: Record<string, unknown> = {
+            seriesId: fixedSeriesId,
+            ...(session.user.role === "MOD" && { uploaderId: session.user.id }),
+        }
+
+        if (hasField("title")) updateData.title = title
+        if (hasField("originalTitle")) updateData.originalTitle = originalTitle
+        if (hasField("authorName")) updateData.authorName = authorName
+        if (hasField("originalAuthorName")) updateData.originalAuthorName = originalAuthorName
+        if (hasField("description")) updateData.description = description
+        if (hasField("coverUrl")) updateData.coverUrl = coverUrl
+        if (hasField("status")) updateData.status = status
+
         const updatedNovel = await prisma.novel.update({
             where: { id },
             data: {
-                title,
-                originalTitle,
-                authorName,
-                originalAuthorName,
-                description,
-                coverUrl,
-                status,
-                seriesId: fixedSeriesId,
-                ...(session.user.role === "MOD" && { uploaderId: session.user.id }),
+                ...updateData,
                 ...(genreIds !== undefined && {
                     genres: {
                         deleteMany: {},

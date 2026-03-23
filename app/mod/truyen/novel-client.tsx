@@ -13,11 +13,12 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
-import { BookOpen, Loader2, Plus, Upload, Edit, Trash2, LayoutGrid, List, Image as ImageIcon, Search, FileText, X, Check, FolderOpen, ChevronLeft, ChevronRight } from "lucide-react"
+import { BookOpen, Loader2, Plus, Upload, Edit, Trash2, LayoutGrid, List, Image as ImageIcon, Search, FileText, X, Check, FolderOpen, ChevronLeft, ChevronRight, WandSparkles } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
 import { getNovelStatusBadgeClass } from "@/lib/novel-status"
 import { Progress } from "@/components/ui/progress"
+import { MOD_AI_PREFILL_STORAGE_KEY, type AINovelPrefillPayload } from "@/lib/mod-ai-tools"
 
 interface Novel {
     id: string
@@ -106,24 +107,19 @@ interface EpubUploadResponseData {
 
 const CHAPTER_REGEX_PRESETS = [
     {
-        id: "vi_chuong",
-        name: "VN - Chương 1: ...",
-        pattern: "^(?:Chương|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
-    },
-    {
-        id: "en_chapter",
-        name: "EN - Chapter 1: ...",
-        pattern: "^(?:Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+        id: "vi_chuong_hoi",
+        name: "VN - Chương/Hồi/Tiết/Phần 1: ...",
+        pattern: "^(?:Chương|Hồi|Tiết|Phần|Thứ|Quyển|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
     },
     {
         id: "mix_chapter",
-        name: "Mixed - Chương/Chapter",
-        pattern: "^(?:Chương|Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+        name: "Mixed - Chương/Hồi/Chapter...",
+        pattern: "^(?:Chương|Hồi|Tiết|Phần|Thứ|Quyển|Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
     },
     {
-        id: "bracket_chapter",
-        name: "[Chương 01] ...",
-        pattern: "^\\[?\\s*(?:Chương|Chapter)\\s*\\d+(?:\\.\\d+)?\\s*\\]?[^\\n]*$",
+        id: "numeric_only",
+        name: "Chỉ có số (1. ...)",
+        pattern: "^\\d+(?:\\.\\d+)?\\s*[\\.\\:\\-\\]\\)]?(?:\\s+|$)[^\\n]*$",
     },
 ]
 
@@ -146,7 +142,7 @@ export function NovelClient() {
     const [epubSeriesId, setEpubSeriesId] = useState("")
     const [epubSeriesName, setEpubSeriesName] = useState("")
     const [epubSplitMode, setEpubSplitMode] = useState<"toc" | "regex">("toc")
-    const [epubRegexPreset, setEpubRegexPreset] = useState<string>("vi_chuong")
+    const [epubRegexPreset, setEpubRegexPreset] = useState<string>("vi_chuong_hoi")
     const [epubCustomRegex, setEpubCustomRegex] = useState("")
     const epubInputRef = useRef<HTMLInputElement>(null)
     const epubFolderInputRef = useRef<HTMLInputElement>(null)
@@ -191,6 +187,7 @@ export function NovelClient() {
     const [pageSize, setPageSize] = useState(20)
     const [bulkProgress, setBulkProgress] = useState<Record<string, BulkUploadProgressItem>>({})
     const [bulkDuplicateHandling, setBulkDuplicateHandling] = useState<BulkDuplicateHandling>("ask")
+    const [pendingAIPrefill, setPendingAIPrefill] = useState<AINovelPrefillPayload | null>(null)
 
     const getSelectedChapterRegex = () => {
         if (epubRegexPreset === "custom") {
@@ -359,6 +356,99 @@ export function NovelClient() {
         fetchGenres()
         fetchSeries()
     }, [])
+
+    const normalizeGenreName = (value: string) => value.trim().toLowerCase()
+
+    const resetAddForm = () => {
+        setTitle("")
+        setOriginalTitle("")
+        setAuthorName("")
+        setOriginalAuthorName("")
+        setDescription("")
+        setCoverUrl("")
+        setSeriesMode("none")
+        setSelectedSeriesId("")
+        setNewSeriesName("")
+        setStatus("Đang ra")
+        setSelectedGenres([])
+        setGenreQuery("")
+    }
+
+    const applyAIPrefillToAddForm = (prefill: AINovelPrefillPayload) => {
+        const nextTitle = prefill.title?.trim() || ""
+        const nextAuthor = prefill.authorName?.trim() || ""
+
+        setTitle(nextTitle)
+        setOriginalTitle((prefill.originalTitle || nextTitle).trim())
+        setAuthorName(nextAuthor)
+        setOriginalAuthorName((prefill.originalAuthorName || nextAuthor).trim())
+        setDescription((prefill.description || "").trim())
+        setCoverUrl((prefill.coverUrl || "").trim())
+        setSeriesMode("none")
+        setSelectedSeriesId("")
+        setNewSeriesName("")
+        setGenreQuery("")
+
+        const validStatus = ["Đang ra", "Hoàn thành", "Tạm ngưng"].includes(prefill.status || "")
+            ? (prefill.status as "Đang ra" | "Hoàn thành" | "Tạm ngưng")
+            : "Đang ra"
+        setStatus(validStatus)
+
+        const suggestedGenres = Array.isArray(prefill.genresSuggested) ? prefill.genresSuggested : []
+        if (suggestedGenres.length === 0 || genres.length === 0) {
+            setSelectedGenres([])
+            return
+        }
+
+        const byName = new Map(genres.map((genre) => [normalizeGenreName(genre.name), genre.id]))
+        const pickedIds: string[] = []
+        const missing: string[] = []
+
+        for (const name of suggestedGenres) {
+            const id = byName.get(normalizeGenreName(name))
+            if (!id) {
+                missing.push(name)
+                continue
+            }
+            if (!pickedIds.includes(id)) pickedIds.push(id)
+        }
+
+        setSelectedGenres(pickedIds)
+
+        if (missing.length > 0) {
+            toast.info(`The loai goi y chua co san: ${missing.slice(0, 4).join(", ")}`)
+        }
+    }
+
+    useEffect(() => {
+        if (typeof window === "undefined") return
+
+        const raw = window.localStorage.getItem(MOD_AI_PREFILL_STORAGE_KEY)
+        if (!raw) return
+
+        window.localStorage.removeItem(MOD_AI_PREFILL_STORAGE_KEY)
+        try {
+            const parsed = JSON.parse(raw) as AINovelPrefillPayload
+            setPendingAIPrefill(parsed)
+            setOpenAdd(true)
+        } catch {
+            toast.error("Du lieu AI Tool khong hop le")
+        }
+    }, [])
+
+    useEffect(() => {
+        if (!pendingAIPrefill) return
+
+        const needsGenres = Array.isArray(pendingAIPrefill.genresSuggested)
+            && pendingAIPrefill.genresSuggested.length > 0
+            && genres.length === 0
+
+        if (needsGenres) return
+
+        applyAIPrefillToAddForm(pendingAIPrefill)
+        setPendingAIPrefill(null)
+        toast.success("Da nap du lieu de xuat tu AI Tool")
+    }, [pendingAIPrefill, genres])
 
     const filteredNovels = useMemo(() => {
         const keyword = searchKeyword.trim().toLowerCase()
@@ -671,18 +761,7 @@ export function NovelClient() {
             if (!res.ok) throw new Error("Thêm mới thất bại")
             toast.success("Đã thêm truyện thành công!")
             setOpenAdd(false)
-            setTitle("")
-            setOriginalTitle("")
-            setAuthorName("")
-            setOriginalAuthorName("")
-            setDescription("")
-            setCoverUrl("")
-            setSeriesMode("none")
-            setSelectedSeriesId("")
-            setNewSeriesName("")
-            setStatus("Đang ra")
-            setSelectedGenres([])
-            setGenreQuery("")
+            resetAddForm()
             fetchNovels()
             fetchSeries()
         } catch {
@@ -707,7 +786,7 @@ export function NovelClient() {
         setEpubSeriesId("")
         setEpubSeriesName("")
         setEpubSplitMode("toc")
-        setEpubRegexPreset("vi_chuong")
+        setEpubRegexPreset("vi_chuong_hoi")
         setEpubCustomRegex("")
         if (epubInputRef.current) {
             epubInputRef.current.value = ""
@@ -799,7 +878,7 @@ export function NovelClient() {
         try {
             await requestEpubPreview(file, {
                 splitMode: "toc",
-                regexPreset: "vi_chuong",
+                regexPreset: "vi_chuong_hoi",
                 regexInput: CHAPTER_REGEX_PRESETS[0].pattern,
                 preserveEditedMetadata: false,
             })
@@ -1273,6 +1352,12 @@ export function NovelClient() {
                         <FolderOpen className="h-4 w-4" />
                         Chọn thư mục EPUB
                     </Button>
+                    <Button variant="outline" className="gap-2" asChild>
+                        <Link href="/mod/ai-tool">
+                            <WandSparkles className="h-4 w-4" />
+                            AI Tool
+                        </Link>
+                    </Button>
 
                     <Dialog
                         open={openEpubPreview}
@@ -1706,13 +1791,13 @@ export function NovelClient() {
                     </Dialog>
 
                     <Dialog open={openAdd} onOpenChange={(val) => {
-                        setOpenAdd(val);
-                        if (val) {
-                                setTitle(""); setOriginalTitle(""); setAuthorName(""); setOriginalAuthorName(""); setDescription(""); setCoverUrl(""); setSeriesMode("none"); setSelectedSeriesId(""); setNewSeriesName(""); setSelectedGenres([]); setGenreQuery("");
+                        setOpenAdd(val)
+                        if (!val) {
+                            resetAddForm()
                         }
                     }}>
                         <DialogTrigger asChild>
-                            <Button className="gap-2">
+                            <Button className="gap-2" onClick={resetAddForm}>
                                 <Plus className="h-4 w-4" /> Thêm truyện
                             </Button>
                         </DialogTrigger>

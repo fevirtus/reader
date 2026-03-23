@@ -1,9 +1,12 @@
 import Link from "next/link"
-import { ArrowRight, Clock3, Flame, MessageSquare, Shuffle, Star, Trophy } from "lucide-react"
+import { ArrowRight, Clock3, Flame, MessageSquare, Shuffle, Trophy } from "lucide-react"
 import { formatViews } from "@/lib/utils"
 import connectToMongoDB from "@/lib/mongoose"
 import { Chapter } from "@/lib/models/chapter"
+import { EditorRecommendation } from "@/lib/models/editor-recommendation"
+import { UserRecommendation } from "@/lib/models/user-recommendation"
 import { HomeHotCarousel, type HotCarouselItem } from "@/components/home-hot-carousel"
+import { HomeRecommendationBoards } from "@/components/home-recommendation-boards"
 
 import { prisma } from "@/lib/prisma"
 
@@ -24,6 +27,21 @@ type HomeNovel = {
   bookmarkCount: number
   seriesId: string | null
   updatedAt: Date
+  uploader?: {
+    name: string | null
+    role: "USER" | "MOD" | "ADMIN"
+  } | null
+}
+
+type EditorRecommendedItem = {
+  novel: HomeNovel
+  editorName: string
+  recommendCount: number
+}
+
+type RecommendedByCountItem = {
+  novel: HomeNovel
+  recommendCount: number
 }
 
 type RankingEntry = {
@@ -67,6 +85,12 @@ const BASE_NOVEL_SELECT = {
   bookmarkCount: true,
   seriesId: true,
   updatedAt: true,
+  uploader: {
+    select: {
+      name: true,
+      role: true,
+    },
+  },
 } as const
 
 function toUTCDateOnly(value: Date): Date {
@@ -147,6 +171,25 @@ function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(
   return output
 }
 
+function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 4000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
+
 async function fetchRankingByDailyViews(options?: { since?: Date; take?: number }): Promise<RankingEntry[]> {
   const delegate = (prisma as any).novelViewDaily
   if (!delegate || typeof delegate.groupBy !== "function") {
@@ -209,6 +252,107 @@ function toHotCarouselItems(rows: Array<RankingEntry & { source: HotCarouselItem
   }))
 }
 
+async function fetchManualRecommendationData(): Promise<{
+  recommendedByCountItems: RecommendedByCountItem[]
+  editorRecommendedItems: EditorRecommendedItem[]
+}> {
+  try {
+    await connectToMongoDB()
+    const editorDocs = (await EditorRecommendation.find({}).sort({ createdAt: -1 }).limit(2000).lean()) as Array<{
+      novelId: string
+      editorId: string
+      createdAt?: Date
+    }>
+    const userDocs = (await UserRecommendation.find({}).sort({ createdAt: -1 }).limit(5000).lean()) as Array<{
+      novelId: string
+      createdAt?: Date
+    }>
+
+    if (editorDocs.length === 0 && userDocs.length === 0) {
+      return {
+        recommendedByCountItems: [],
+        editorRecommendedItems: [],
+      }
+    }
+
+    const novelIds = Array.from(
+      new Set(
+        [...editorDocs.map((doc) => doc.novelId), ...userDocs.map((doc) => doc.novelId)].filter(Boolean)
+      )
+    )
+    const editorIds = Array.from(new Set(editorDocs.map((doc) => doc.editorId).filter(Boolean)))
+
+    const [novels, editors] = await Promise.all([
+      prisma.novel.findMany({
+        where: { id: { in: novelIds } },
+        select: BASE_NOVEL_SELECT,
+      }),
+      prisma.user.findMany({
+        where: { id: { in: editorIds } },
+        select: { id: true, name: true },
+      }),
+    ])
+
+    const novelMap = new Map(novels.map((novel) => [novel.id, novel as HomeNovel]))
+    const editorMap = new Map(editors.map((editor) => [editor.id, editor]))
+    const recommendCountMap = new Map<string, number>()
+
+    for (const doc of editorDocs) {
+      recommendCountMap.set(doc.novelId, (recommendCountMap.get(doc.novelId) || 0) + 1)
+    }
+
+    for (const doc of userDocs) {
+      recommendCountMap.set(doc.novelId, (recommendCountMap.get(doc.novelId) || 0) + 1)
+    }
+
+    const recommendedByCountItems = Array.from(recommendCountMap.entries())
+      .map(([novelId, recommendCount]) => ({
+        novel: novelMap.get(novelId),
+        recommendCount,
+      }))
+      .filter((row): row is { novel: HomeNovel; recommendCount: number } => Boolean(row.novel))
+      .sort((a, b) => {
+        if (b.recommendCount !== a.recommendCount) return b.recommendCount - a.recommendCount
+        if (b.novel.rating !== a.novel.rating) return b.novel.rating - a.novel.rating
+        return b.novel.views - a.novel.views
+      })
+
+    const editorRecommendedItems = editorDocs
+      .map((doc) => {
+        const novel = novelMap.get(doc.novelId)
+        if (!novel) return null
+
+        return {
+          novel,
+          editorName: editorMap.get(doc.editorId)?.name || "Biên tập viên",
+          recommendCount: recommendCountMap.get(doc.novelId) || 0,
+          createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : 0,
+        }
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .sort((a, b) => {
+        if (b.recommendCount !== a.recommendCount) return b.recommendCount - a.recommendCount
+        return b.createdAt - a.createdAt
+      })
+      .map((item) => ({
+        novel: item.novel,
+        editorName: item.editorName,
+        recommendCount: item.recommendCount,
+      }))
+
+    return {
+      recommendedByCountItems,
+      editorRecommendedItems,
+    }
+  } catch (error) {
+    console.warn("Homepage manual recommendation query failed", error)
+    return {
+      recommendedByCountItems: [],
+      editorRecommendedItems: [],
+    }
+  }
+}
+
 function RankingBoard({
   title,
   entries,
@@ -256,7 +400,8 @@ function RankingBoard({
 export default async function HomePage() {
   let hotSlides: HotCarouselItem[] = []
   let randomNovels: HomeNovel[] = []
-  let recommendedNovels: HomeNovel[] = []
+  let recommendedByCountItems: RecommendedByCountItem[] = []
+  let editorRecommendedItems: EditorRecommendedItem[] = []
   let latestNovels: HomeNovel[] = []
   let recentComments: RecentCommentItem[] = []
   let weeklyRanking: RankingEntry[] = []
@@ -277,34 +422,24 @@ export default async function HomePage() {
       allTimeResult,
       popularFallbackResult,
       randomPoolResult,
-      recommendedPoolResult,
-      latestPoolResult,
+      recommendationResult,
       commentsResult,
     ] = await Promise.allSettled([
-      fetchRankingByDailyViews({ since: weekStart, take: 600 }),
-      fetchRankingByDailyViews({ since: monthStart, take: 600 }),
-      fetchRankingByDailyViews({ take: 800 }),
-      prisma.novel.findMany({
+      withTimeout(fetchRankingByDailyViews({ since: weekStart, take: 600 }), "Homepage weekly ranking"),
+      withTimeout(fetchRankingByDailyViews({ since: monthStart, take: 600 }), "Homepage monthly ranking"),
+      withTimeout(fetchRankingByDailyViews({ take: 800 }), "Homepage all-time ranking"),
+      withTimeout(prisma.novel.findMany({
         take: 400,
         select: BASE_NOVEL_SELECT,
         orderBy: [{ views: "desc" }, { updatedAt: "desc" }],
-      }),
-      prisma.novel.findMany({
+      }), "Homepage popular fallback"),
+      withTimeout(prisma.novel.findMany({
         take: 420,
         select: BASE_NOVEL_SELECT,
         orderBy: [{ updatedAt: "desc" }],
-      }),
-      prisma.novel.findMany({
-        take: 220,
-        select: BASE_NOVEL_SELECT,
-        orderBy: [{ rating: "desc" }, { bookmarkCount: "desc" }, { views: "desc" }],
-      }),
-      prisma.novel.findMany({
-        take: 180,
-        select: BASE_NOVEL_SELECT,
-        orderBy: [{ updatedAt: "desc" }],
-      }),
-      prisma.comment.findMany({
+      }), "Homepage random pool"),
+      withTimeout(fetchManualRecommendationData(), "Homepage recommendations"),
+      withTimeout(prisma.comment.findMany({
         take: 10,
         orderBy: { createdAt: "desc" },
         select: {
@@ -314,7 +449,7 @@ export default async function HomePage() {
           user: { select: { name: true } },
           novel: { select: { slug: true, title: true } },
         },
-      }),
+      }), "Homepage comments"),
     ])
 
     if (weeklyResult.status === "rejected") console.warn("Homepage weekly ranking query failed", weeklyResult.reason)
@@ -322,8 +457,7 @@ export default async function HomePage() {
     if (allTimeResult.status === "rejected") console.warn("Homepage all-time ranking query failed", allTimeResult.reason)
     if (popularFallbackResult.status === "rejected") console.warn("Homepage popular fallback query failed", popularFallbackResult.reason)
     if (randomPoolResult.status === "rejected") console.warn("Homepage random pool query failed", randomPoolResult.reason)
-    if (recommendedPoolResult.status === "rejected") console.warn("Homepage recommended pool query failed", recommendedPoolResult.reason)
-    if (latestPoolResult.status === "rejected") console.warn("Homepage latest pool query failed", latestPoolResult.reason)
+    if (recommendationResult.status === "rejected") console.warn("Homepage recommendation query failed", recommendationResult.reason)
     if (commentsResult.status === "rejected") console.warn("Homepage comments query failed", commentsResult.reason)
 
     const weeklyRaw = weeklyResult.status === "fulfilled" ? weeklyResult.value : []
@@ -331,8 +465,9 @@ export default async function HomePage() {
     const allTimeRaw = allTimeResult.status === "fulfilled" ? allTimeResult.value : []
     const popularFallbackRaw = popularFallbackResult.status === "fulfilled" ? popularFallbackResult.value : []
     const randomPoolRaw = randomPoolResult.status === "fulfilled" ? randomPoolResult.value : []
-    const recommendedPoolRaw = recommendedPoolResult.status === "fulfilled" ? recommendedPoolResult.value : []
-    const latestPoolRaw = latestPoolResult.status === "fulfilled" ? latestPoolResult.value : []
+    const recommendationData = recommendationResult.status === "fulfilled"
+      ? recommendationResult.value
+      : { recommendedByCountItems: [], editorRecommendedItems: [] }
     const commentsPool = commentsResult.status === "fulfilled" ? commentsResult.value : []
 
     const popularFallbackRows: RankingEntry[] = (popularFallbackRaw as HomeNovel[]).map((novel) => ({
@@ -342,9 +477,9 @@ export default async function HomePage() {
       aggregatedViews: novel.views,
     }))
 
-    weeklyRanking = fillUniqueRows(collapseSeriesRows(weeklyRaw), collapseSeriesRows(popularFallbackRows), 10)
-    monthlyRanking = fillUniqueRows(collapseSeriesRows(monthlyRaw), collapseSeriesRows(popularFallbackRows), 10)
-    allTimeRanking = fillUniqueRows(collapseSeriesRows(allTimeRaw), collapseSeriesRows(popularFallbackRows), 10)
+    weeklyRanking = fillUniqueRows(collapseSeriesRows(weeklyRaw), collapseSeriesRows(popularFallbackRows), 5)
+    monthlyRanking = fillUniqueRows(collapseSeriesRows(monthlyRaw), collapseSeriesRows(popularFallbackRows), 5)
+    allTimeRanking = fillUniqueRows(collapseSeriesRows(allTimeRaw), collapseSeriesRows(popularFallbackRows), 5)
 
     const hotWeekly = weeklyRanking.slice(0, 5).map((entry) => ({ ...entry, source: "week" as const }))
     const hotMonthly = monthlyRanking.slice(0, 5).map((entry) => ({ ...entry, source: "month" as const }))
@@ -361,42 +496,72 @@ export default async function HomePage() {
     const randomCandidates = collapseSeriesRows(shuffleRows(randomPool)).filter((item) => !usedHotIds.has(item.id))
     randomNovels = fillUniqueRows(randomCandidates, shuffleRows(randomPool), 12)
 
-    recommendedNovels = fillUniqueRows(
-      collapseSeriesRows(recommendedPoolRaw as HomeNovel[]),
-      collapseSeriesRows(popularFallbackRaw as HomeNovel[]),
-      10,
-    )
+    recommendedByCountItems = recommendationData.recommendedByCountItems
+    editorRecommendedItems = recommendationData.editorRecommendedItems
 
-    latestNovels = fillUniqueRows(
-      collapseSeriesRows(latestPoolRaw as HomeNovel[]),
-      collapseSeriesRows(popularFallbackRaw as HomeNovel[]),
-      12,
-    )
     recentComments = commentsPool as RecentCommentItem[]
 
-    const latestIds = latestNovels.map((item) => item.id)
-    if (latestIds.length > 0) {
-      await connectToMongoDB()
-      const rows = await Chapter.aggregate([
-        { $match: { novelId: { $in: latestIds } } },
-        { $sort: { novelId: 1, createdAt: -1, number: -1 } },
-        {
-          $group: {
-            _id: "$novelId",
-            chapterNumber: { $first: "$number" },
-            chapterTitle: { $first: "$title" },
-            chapterCreatedAt: { $first: "$createdAt" },
-          },
-        },
-      ])
+    try {
+      // Latest-updated list is based only on newly created chapters, not on novel metadata edits.
+      // Sampling recent inserts by Mongo _id keeps this query on the default index and avoids scanning the whole collection.
+      await withTimeout(connectToMongoDB(), "Homepage chapter Mongo connect")
+      const recentChapterRows = await withTimeout(
+        Chapter.find(
+          {},
+          {
+            novelId: 1,
+            number: 1,
+            title: 1,
+            createdAt: 1,
+          }
+        )
+          .sort({ _id: -1 })
+          .limit(400)
+          .lean() as Promise<Array<{
+            novelId?: string
+            number?: number
+            title?: string
+            createdAt?: Date
+          }>>,
+        "Homepage recent chapters"
+      )
 
-      for (const row of rows) {
-        latestChapterMap.set(String(row._id), {
-          chapterNumber: typeof row.chapterNumber === "number" ? row.chapterNumber : null,
-          chapterTitle: typeof row.chapterTitle === "string" ? row.chapterTitle : null,
-          chapterCreatedAt: row.chapterCreatedAt ? new Date(row.chapterCreatedAt) : null,
+      const latestNovelIdsByChapter: string[] = []
+      const latestSeenNovelIds = new Set<string>()
+
+      for (const row of recentChapterRows) {
+        const novelId = String(row.novelId || "").trim()
+        if (!novelId || latestSeenNovelIds.has(novelId)) continue
+
+        latestSeenNovelIds.add(novelId)
+        latestNovelIdsByChapter.push(novelId)
+        latestChapterMap.set(novelId, {
+          chapterNumber: typeof row.number === "number" ? row.number : null,
+          chapterTitle: typeof row.title === "string" ? row.title : null,
+          chapterCreatedAt: row.createdAt ? new Date(row.createdAt) : null,
         })
+
+        if (latestNovelIdsByChapter.length >= 500) break
       }
+
+      if (latestNovelIdsByChapter.length > 0) {
+        const latestNovelPool = await withTimeout(
+          prisma.novel.findMany({
+            where: { id: { in: latestNovelIdsByChapter } },
+            select: BASE_NOVEL_SELECT,
+          }),
+          "Homepage latest novel pool"
+        )
+
+        const latestNovelMap = new Map(latestNovelPool.map((novel) => [novel.id, novel as HomeNovel]))
+        const orderedLatestByChapter = latestNovelIdsByChapter
+          .map((id) => latestNovelMap.get(id))
+          .filter((row): row is HomeNovel => Boolean(row))
+
+        latestNovels = collapseSeriesRows(orderedLatestByChapter).slice(0, 5)
+      }
+    } catch (error) {
+      console.warn("Homepage latest chapter section skipped", error)
     }
   } catch (error) {
     console.error("Failed to fetch data for homepage during build/runtime", error)
@@ -456,41 +621,64 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-5">
-        <div className="rounded-2xl border border-border/70 bg-card/70 p-4 lg:col-span-3">
-          <h2 className="mb-4 text-xl font-bold text-foreground">Top truyện đề cử</h2>
+      <HomeRecommendationBoards topItems={recommendedByCountItems} editorItems={editorRecommendedItems} pageSize={5} />
+
+      <section>
+        <div className="mb-4">
+          <h2 className="text-xl font-bold text-foreground">Bảng xếp hạng độ hot</h2>
+          <p className="text-sm text-muted-foreground">So sánh độ nóng theo tuần, tháng và toàn thời gian.</p>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <RankingBoard title="Hot theo tuần" entries={weeklyRanking} emptyText="Tuần này chưa có dữ liệu nổi bật." />
+          <RankingBoard title="Hot theo tháng" entries={monthlyRanking} emptyText="Tháng này chưa có dữ liệu nổi bật." />
+          <RankingBoard title="Hot toàn thời gian" entries={allTimeRanking} emptyText="Chưa có dữ liệu toàn thời gian." />
+        </div>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="inline-flex items-center gap-2 text-xl font-bold text-foreground"><Clock3 className="h-5 w-5 text-primary" />Truyện mới cập nhật</h2>
+            <Link href="/tim-kiem?sort=latest" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+              Xem tất cả <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+
           <div className="space-y-2">
-            {recommendedNovels.length > 0 ? recommendedNovels.map((novel, index) => (
-              <Link
-                key={novel.id}
-                href={`/truyen/${novel.slug}`}
-                className="group flex items-center gap-3 rounded-xl border border-border bg-background/80 p-2.5 transition hover:border-primary/40"
-              >
-                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
-                  {index + 1}
-                </span>
-                <img
-                  src={novel.coverUrl || "/default-cover.svg"}
-                  alt={novel.title}
-                  className="h-20 w-14 shrink-0 rounded-md border border-border/70 object-cover"
-                />
-                <div className="min-w-0 flex-1">
-                  <h3 className="line-clamp-1 text-sm font-semibold text-foreground group-hover:text-primary">{novel.title}</h3>
-                  <p className="text-xs text-muted-foreground">{novel.authorName}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{formatViews(novel.bookmarkCount)} theo dõi</p>
-                </div>
-                <div className="inline-flex items-center gap-1 text-xs font-semibold text-primary">
-                  <Star className="h-3.5 w-3.5 fill-primary text-primary" />
-                  {novel.rating.toFixed(1)}
-                </div>
-              </Link>
-            )) : (
-              <p className="text-sm text-muted-foreground">Chưa có truyện đề cử.</p>
+            {latestNovels.length > 0 ? latestNovels.map((novel) => {
+              const chapter = latestChapterMap.get(novel.id)
+              const chapterLabel = chapter?.chapterNumber ? `Chương ${chapter.chapterNumber}` : "Chưa có chương"
+              const chapterTitle = chapter?.chapterTitle ? compactLine(chapter.chapterTitle, 100) : "Đang cập nhật nội dung chương"
+              const updatedTime = formatRelativeTime(chapter?.chapterCreatedAt || novel.updatedAt)
+
+              return (
+                <Link
+                  key={novel.id}
+                  href={`/truyen/${novel.slug}`}
+                  className="group flex items-center gap-3 rounded-xl border border-border bg-background/80 p-3 transition hover:border-primary/40"
+                >
+                  <img
+                    src={novel.coverUrl || "/default-cover.svg"}
+                    alt={novel.title}
+                    className="h-20 w-14 shrink-0 rounded-md border border-border/70 object-cover"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <h3 className="line-clamp-1 text-sm font-semibold text-foreground group-hover:text-primary">{novel.title}</h3>
+                    <p className="text-xs text-muted-foreground">{novel.authorName}</p>
+                    <p className="mt-1 text-xs text-primary">{chapterLabel}</p>
+                    <p className="line-clamp-1 text-xs text-muted-foreground">{chapterTitle}</p>
+                  </div>
+                  <div className="text-right text-[11px] text-muted-foreground">{updatedTime}</div>
+                </Link>
+              )
+            }) : (
+              <p className="text-sm text-muted-foreground">Chưa có truyện mới cập nhật.</p>
             )}
           </div>
         </div>
 
-        <aside className="rounded-2xl border border-border/70 bg-card/70 p-4 lg:col-span-2">
+        <aside className="rounded-2xl border border-border/70 bg-card/70 p-4">
           <h2 className="mb-4 inline-flex items-center gap-2 text-xl font-bold text-foreground"><MessageSquare className="h-5 w-5 text-primary" />Bình luận mới</h2>
 
           <div className="space-y-2">
@@ -512,60 +700,6 @@ export default async function HomePage() {
             )}
           </div>
         </aside>
-      </section>
-
-      <section className="rounded-2xl border border-border/70 bg-card/70 p-4">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="inline-flex items-center gap-2 text-xl font-bold text-foreground"><Clock3 className="h-5 w-5 text-primary" />Truyện mới cập nhật</h2>
-          <Link href="/tim-kiem?sort=latest" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
-            Xem tất cả <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
-
-        <div className="space-y-2">
-          {latestNovels.length > 0 ? latestNovels.map((novel) => {
-            const chapter = latestChapterMap.get(novel.id)
-            const chapterLabel = chapter?.chapterNumber ? `Chương ${chapter.chapterNumber}` : "Chưa có chương"
-            const chapterTitle = chapter?.chapterTitle ? compactLine(chapter.chapterTitle, 100) : "Đang cập nhật nội dung chương"
-            const updatedTime = formatRelativeTime(chapter?.chapterCreatedAt || novel.updatedAt)
-
-            return (
-              <Link
-                key={novel.id}
-                href={`/truyen/${novel.slug}`}
-                className="group flex items-center gap-3 rounded-xl border border-border bg-background/80 p-3 transition hover:border-primary/40"
-              >
-                <img
-                  src={novel.coverUrl || "/default-cover.svg"}
-                  alt={novel.title}
-                  className="h-20 w-14 shrink-0 rounded-md border border-border/70 object-cover"
-                />
-                <div className="min-w-0 flex-1">
-                  <h3 className="line-clamp-1 text-sm font-semibold text-foreground group-hover:text-primary">{novel.title}</h3>
-                  <p className="text-xs text-muted-foreground">{novel.authorName}</p>
-                  <p className="mt-1 text-xs text-primary">{chapterLabel}</p>
-                  <p className="line-clamp-1 text-xs text-muted-foreground">{chapterTitle}</p>
-                </div>
-                <div className="text-right text-[11px] text-muted-foreground">{updatedTime}</div>
-              </Link>
-            )
-          }) : (
-            <p className="text-sm text-muted-foreground">Chưa có truyện mới cập nhật.</p>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <div className="mb-4">
-          <h2 className="text-xl font-bold text-foreground">Bảng xếp hạng độ hot</h2>
-          <p className="text-sm text-muted-foreground">So sánh độ nóng theo tuần, tháng và toàn thời gian.</p>
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-3">
-          <RankingBoard title="Hot theo tuần" entries={weeklyRanking} emptyText="Tuần này chưa có dữ liệu nổi bật." />
-          <RankingBoard title="Hot theo tháng" entries={monthlyRanking} emptyText="Tháng này chưa có dữ liệu nổi bật." />
-          <RankingBoard title="Hot toàn thời gian" entries={allTimeRanking} emptyText="Chưa có dữ liệu toàn thời gian." />
-        </div>
       </section>
     </div>
   )

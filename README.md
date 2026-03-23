@@ -45,6 +45,11 @@ NEXTAUTH_URL="http://localhost:3000"
 GOOGLE_CLIENT_ID="your_google_client_id"
 GOOGLE_CLIENT_SECRET="your_google_client_secret"
 
+# AI Tool cho MOD (LLM + web search)
+OPENAI_API_KEY="your_openai_api_key"
+# Tùy chọn, mặc định: gpt-4o-mini-search-preview
+OPENAI_WEB_MODEL="gpt-4o-mini-search-preview"
+
 # Cloudflare R2 (lưu ảnh bìa)
 R2_ACCOUNT_ID="your_cloudflare_account_id"
 R2_ACCESS_KEY_ID="your_r2_access_key_id"

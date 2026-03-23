@@ -116,18 +116,23 @@ function isRequestAbortedError(error: unknown): boolean {
 }
 
 const CHAPTER_REGEX_PRESETS: Record<string, string> = {
-    vi_chuong: "^(?:Chương|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
-    en_chapter: "^(?:Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
-    mix_chapter: "^(?:Chương|Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
-    bracket_chapter: "^\\[?\\s*(?:Chương|Chapter)\\s*\\d+(?:\\.\\d+)?\\s*\\]?[^\\n]*$",
+    vi_chuong_hoi: "^(?:Chương|Hồi|Tiết|Phần|Thứ|Quyển|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+    mix_chapter: "^(?:Chương|Hồi|Tiết|Phần|Thứ|Quyển|Chapter|Ch\\.)\\s*\\d+(?:\\.\\d+)?[^\\n]*$",
+    numeric_only: "^\\d+(?:\\.\\d+)?\\s*[\\.\\:\\-\\]\\)]?(?:\\s+|$)[^\\n]*$",
+}
+
+const LEGACY_CHAPTER_REGEX_PRESET_ALIASES: Record<string, keyof typeof CHAPTER_REGEX_PRESETS> = {
+    vi_chuong: "vi_chuong_hoi",
+    en_chapter: "mix_chapter",
+    bracket_chapter: "mix_chapter",
 }
 
 const NOISE_TITLE_REGEX = /^(?:mục lục|table of contents|toc|cover|bìa|copyright)$/i
 
-const SIMPLE_CHAPTER_TITLE_REGEX = /^(?:ch(?:ương|apter)?|ch\.)\s*\d+(?:\.\d+)?\s*:?$/i
+const SIMPLE_CHAPTER_TITLE_REGEX = /^(?:ch(?:ương|apter)?|ch\.|hồi|tiết|phần|thứ|quyển)\s*\d+(?:\.\d+)?\s*:?$/i
 const GENERIC_SECTION_TITLE_REGEX = /^(?:m[uụ]c|section|sec\.?|part|ph[aầ]n)\s*[0-9ivxlcdm]+$/i
-const WEAK_CHAPTER_TOC_TITLE_REGEX = /^(?:ch(?:ương|apter)?|ch\.)\s*\d+(?:\.\d+)?\s*[:\-–—]\s*(?:m[uụ]c|section|sec\.?|part)\s*[0-9ivxlcdm]+$/i
-const CHAPTER_HEADING_LINE_REGEX = /^(?:\[?\s*)?(?:ch(?:ương|apter)?|ch\.)\s*([0-9]+)(?:\.[0-9]+)?(?:\s*\]?)*(?:(?:\s*[:\-–—\.]\s*|\s+)(.+))?$/i
+const WEAK_CHAPTER_TOC_TITLE_REGEX = /^(?:ch(?:ương|apter)?|ch\.|hồi|tiết|phần|thứ|quyển)\s*\d+(?:\.\d+)?\s*[:\-–—]\s*(?:m[uụ]c|section|sec\.?|part)\s*[0-9ivxlcdm]+$/i
+const CHAPTER_HEADING_LINE_REGEX = /^(?:\[?\s*)?(?:ch(?:ương|apter)?|ch\.|hồi|tiết|phần|thứ|quyển)?\s*([0-9]+)(?:\.[0-9]+)?(?:\s*\]?)*(?:(?:\s*[:\-–—\.]\s*|\s+)(.+))?$/i
 const GENERIC_GENRE_TOKENS = new Set([
     "book",
     "books",
@@ -555,11 +560,14 @@ function resolveRegexPattern(formData: FormData): { regexInput: string; regexPre
         return { regexInput: custom, regexPreset: preset || "custom" }
     }
 
-    if (preset && CHAPTER_REGEX_PRESETS[preset]) {
-        return { regexInput: CHAPTER_REGEX_PRESETS[preset], regexPreset: preset }
+    if (preset) {
+        const normalizedPreset = (CHAPTER_REGEX_PRESETS[preset] ? preset : LEGACY_CHAPTER_REGEX_PRESET_ALIASES[preset]) || null
+        if (normalizedPreset && CHAPTER_REGEX_PRESETS[normalizedPreset]) {
+            return { regexInput: CHAPTER_REGEX_PRESETS[normalizedPreset], regexPreset: normalizedPreset }
+        }
     }
 
-    return { regexInput: CHAPTER_REGEX_PRESETS.vi_chuong, regexPreset: "vi_chuong" }
+    return { regexInput: CHAPTER_REGEX_PRESETS.vi_chuong_hoi, regexPreset: "vi_chuong_hoi" }
 }
 
 function buildRegexFromInput(regexInput: string): { regex: RegExp; normalized: string } {
@@ -579,6 +587,7 @@ function buildRegexFromInput(regexInput: string): { regex: RegExp; normalized: s
     const flagSet = new Set(flags.split(""))
     flagSet.add("g")
     flagSet.add("m")
+    flagSet.add("i")
     const normalizedFlags = Array.from(flagSet).join("")
     const regex = new RegExp(pattern, normalizedFlags)
 
@@ -740,6 +749,33 @@ function buildChaptersFromRegexSections(sections: EpubSection[], regex: RegExp):
     return enrichVolumeMetadata(parsed)
 }
 
+function trimLeadingBeforeChapterOne(chapters: ParsedChapter[]): {
+    chapters: ParsedChapter[]
+    trimmedCount: number
+} {
+    if (chapters.length === 0) {
+        return { chapters, trimmedCount: 0 }
+    }
+
+    const firstChapterOneIndex = chapters.findIndex((chapter) => {
+        const detected =
+            chapter.detectedChapterNumber ??
+            extractStrictChapterNumber(chapter.title) ??
+            extractChapterNumber(chapter.title)
+
+        return detected === 1
+    })
+
+    if (firstChapterOneIndex <= 0) {
+        return { chapters, trimmedCount: 0 }
+    }
+
+    return {
+        chapters: chapters.slice(firstChapterOneIndex),
+        trimmedCount: firstChapterOneIndex,
+    }
+}
+
 function withMissingChapterPlaceholders(chapters: ParsedChapter[]): {
     chapters: ParsedChapter[]
     insertedCount: number
@@ -763,7 +799,7 @@ function withMissingChapterPlaceholders(chapters: ParsedChapter[]): {
         let canUseDetected =
             detectedNumber !== null &&
             detectedNumber > currentNumber &&
-            detectedNumber - currentNumber <= MAX_ALLOWED_GAP
+            (currentNumber === 0 || detectedNumber - currentNumber <= MAX_ALLOWED_GAP)
 
         // Recover from noisy leading TOC entries such as "Mục 1" that shift numbering.
         if (!canUseDetected && detectedNumber !== null && detectedNumber > 0 && detectedNumber <= currentNumber) {
@@ -778,22 +814,24 @@ function withMissingChapterPlaceholders(chapters: ParsedChapter[]): {
                 currentNumber = Math.max(0, currentNumber - 1)
             }
 
-            canUseDetected = detectedNumber > currentNumber && detectedNumber - currentNumber <= MAX_ALLOWED_GAP
+            canUseDetected = detectedNumber > currentNumber && (currentNumber === 0 || detectedNumber - currentNumber <= MAX_ALLOWED_GAP)
         }
 
         if (canUseDetected && detectedNumber !== null) {
-            for (let missing = currentNumber + 1; missing < detectedNumber; missing++) {
-                insertedCount += 1
-                normalized.push({
-                    title: `Chương ${missing} (Thiếu)`,
-                    content: `[THIEU CHUONG ${missing}]\n\nNoi dung chuong nay dang thieu tu EPUB goc. Vui long bo sung sau.`,
-                    detectedChapterNumber: missing,
-                    finalNumber: missing,
-                    volumeNumber: null,
-                    volumeTitle: null,
-                    volumeChapterNumber: null,
-                    isPlaceholder: true,
-                })
+            if (currentNumber > 0) {
+                for (let missing = currentNumber + 1; missing < detectedNumber; missing++) {
+                    insertedCount += 1
+                    normalized.push({
+                        title: `Chương ${missing} (Thiếu)`,
+                        content: `[THIEU CHUONG ${missing}]\n\nNoi dung chuong nay dang thieu tu EPUB goc. Vui long bo sung sau.`,
+                        detectedChapterNumber: missing,
+                        finalNumber: missing,
+                        volumeNumber: null,
+                        volumeTitle: null,
+                        volumeChapterNumber: null,
+                        isPlaceholder: true,
+                    })
+                }
             }
 
             detectedNumberAssignments += 1
@@ -971,6 +1009,7 @@ export async function POST(req: Request) {
         const seriesIdInput = readFormText(formData, "seriesId")
         const seriesNameInput = readFormText(formData, "seriesName")
         const replaceExisting = String(formData.get("replaceExisting") || "").toLowerCase() === "true"
+        const appendTargetNovelId = String(formData.get("appendTargetNovelId") || "").trim()
 
         if (!epubFile) {
             return NextResponse.json({ error: "Thiếu file EPUB" }, { status: 400 })
@@ -1020,7 +1059,8 @@ export async function POST(req: Request) {
                 }
             }
 
-            const gapFilled = withMissingChapterPlaceholders(chapters)
+            const leadingTrimmed = trimLeadingBeforeChapterOne(chapters)
+            const gapFilled = withMissingChapterPlaceholders(leadingTrimmed.chapters)
 
             parsedData = {
                 metadata,
@@ -1033,6 +1073,7 @@ export async function POST(req: Request) {
                     regexPreset,
                     sourceSections: sections.length,
                     chaptersDetected: chapters.length,
+                    trimmedBeforeChapterOne: leadingTrimmed.trimmedCount,
                     chaptersFinal: gapFilled.chapters.length,
                     insertedMissingChapters: gapFilled.insertedCount,
                     detectedMaxChapterNumber: gapFilled.detectedMax,
@@ -1086,150 +1127,170 @@ export async function POST(req: Request) {
             })
         }
 
-        const duplicatedNovel = await findNovelByTitleInsensitive(novelTitle)
-        const canReplaceDuplicated = duplicatedNovel
-            ? canReplaceNovelByRole(session.user.role as UserRole, session.user.id, duplicatedNovel)
-            : false
-
-        if (duplicatedNovel && !replaceExisting) {
-            return NextResponse.json({
-                code: "DUPLICATE_TITLE",
-                error: `Truyện \"${duplicatedNovel.title}\" đã tồn tại`,
-                canReplace: canReplaceDuplicated,
-                existingNovel: {
-                    id: duplicatedNovel.id,
-                    title: duplicatedNovel.title,
-                    slug: duplicatedNovel.slug,
-                },
-            }, { status: 409 })
-        }
-
-        if (duplicatedNovel && replaceExisting && !canReplaceDuplicated) {
-            return NextResponse.json({
-                code: "DUPLICATE_TITLE",
-                error: "Bạn không có quyền replace truyện đã tồn tại",
-                canReplace: false,
-                existingNovel: {
-                    id: duplicatedNovel.id,
-                    title: duplicatedNovel.title,
-                    slug: duplicatedNovel.slug,
-                },
-            }, { status: 403 })
-        }
-
-        const resolvedGenreIds = await resolveGenreIdsFromNames(detectedGenreNames, true)
-
-        const selectedSeriesId = await resolveSeriesIdForEpubImport({
-            mode: seriesMode,
-            seriesId: seriesIdInput,
-            seriesName: seriesNameInput,
-            userRole: session.user.role,
-            userId: session.user.id,
-        })
-
-        const coverUrl = await saveCoverBufferToR2(cover)
-
-        let targetNovelId = duplicatedNovel?.id || ""
+        let targetNovelId = ""
         let responseStatus = 201
         let replaced = false
+        let isAppending = !!appendTargetNovelId
+        let finalCoverUrl: string | null = null
 
-        if (duplicatedNovel && replaceExisting) {
-            const updatedNovel = await prisma.$transaction(async (tx) => {
-                await tx.novel.update({
-                    where: { id: duplicatedNovel.id },
-                    data: {
-                        title: novelTitle,
-                        authorName: novelAuthor,
-                        description: novelDesc,
-                        status: importDefaultStatus,
-                        coverUrl,
-                        seriesId: selectedSeriesId,
-                        totalChapters: chapters.length,
-                        ...(session.user.role === "MOD" ? { uploaderId: session.user.id } : {}),
-                    },
-                })
+        if (isAppending) {
+            const targetNovel = await prisma.novel.findUnique({ where: { id: appendTargetNovelId } })
+            if (!targetNovel || !canReplaceNovelByRole(session.user.role as UserRole, session.user.id, targetNovel)) {
+                return NextResponse.json({ error: "Truyện không tồn tại hoặc không đủ quyền thao tác báo cáo bổ sung." }, { status: 403 })
+            }
+            targetNovelId = targetNovel.id
+            responseStatus = 200
+            finalCoverUrl = targetNovel.coverUrl
+        } else {
+            const duplicatedNovel = await findNovelByTitleInsensitive(novelTitle)
+            const canReplaceDuplicated = duplicatedNovel ? canReplaceNovelByRole(session.user.role as UserRole, session.user.id, duplicatedNovel) : false
 
-                await tx.novelGenre.deleteMany({
-                    where: { novelId: duplicatedNovel.id },
-                })
+            if (duplicatedNovel && !replaceExisting) {
+                return NextResponse.json({
+                    code: "DUPLICATE_TITLE",
+                    error: `Truyện "${duplicatedNovel.title}" đã tồn tại`,
+                    canReplace: canReplaceDuplicated,
+                    existingNovel: { id: duplicatedNovel.id, title: duplicatedNovel.title, slug: duplicatedNovel.slug },
+                }, { status: 409 })
+            }
 
-                if (resolvedGenreIds.length > 0) {
-                    await tx.novelGenre.createMany({
-                        data: resolvedGenreIds.map((genreId) => ({
-                            novelId: duplicatedNovel.id,
-                            genreId,
-                        })),
-                        skipDuplicates: true,
-                    })
-                }
+            if (duplicatedNovel && replaceExisting && !canReplaceDuplicated) {
+                return NextResponse.json({
+                    code: "DUPLICATE_TITLE",
+                    error: "Bạn không có quyền replace truyện đã tồn tại",
+                    canReplace: false,
+                    existingNovel: { id: duplicatedNovel.id, title: duplicatedNovel.title, slug: duplicatedNovel.slug },
+                }, { status: 403 })
+            }
 
-                return tx.novel.findUnique({ where: { id: duplicatedNovel.id } })
+            const resolvedGenreIds = await resolveGenreIdsFromNames(detectedGenreNames, true)
+            const selectedSeriesId = await resolveSeriesIdForEpubImport({
+                mode: seriesMode,
+                seriesId: seriesIdInput,
+                seriesName: seriesNameInput,
+                userRole: session.user.role,
+                userId: session.user.id,
             })
 
-            if (!updatedNovel) {
-                throw new Error("Không thể replace truyện đã tồn tại")
-            }
+            const coverUrl = await saveCoverBufferToR2(cover)
+            finalCoverUrl = coverUrl
+            targetNovelId = duplicatedNovel?.id || ""
 
-            targetNovelId = updatedNovel.id
-            responseStatus = 200
-            replaced = true
+            if (duplicatedNovel && replaceExisting) {
+                const updatedNovel = await prisma.$transaction(async (tx) => {
+                    await tx.novel.update({
+                        where: { id: duplicatedNovel.id },
+                        data: {
+                            title: novelTitle,
+                            authorName: novelAuthor,
+                            description: novelDesc,
+                            status: importDefaultStatus,
+                            coverUrl,
+                            seriesId: selectedSeriesId,
+                            totalChapters: chapters.length,
+                            ...(session.user.role === "MOD" ? { uploaderId: session.user.id } : {}),
+                        },
+                    })
+                    await tx.novelGenre.deleteMany({ where: { novelId: duplicatedNovel.id } })
+                    if (resolvedGenreIds.length > 0) {
+                        await tx.novelGenre.createMany({
+                            data: resolvedGenreIds.map((genreId) => ({ novelId: duplicatedNovel.id, genreId })),
+                            skipDuplicates: true,
+                        })
+                    }
+                    return tx.novel.findUnique({ where: { id: duplicatedNovel.id } })
+                })
 
-            if (duplicatedNovel.coverUrl && duplicatedNovel.coverUrl !== coverUrl) {
-                await deleteR2ObjectByUrl(duplicatedNovel.coverUrl).catch(() => { })
-            }
-        } else {
-            // Generate base slug
-            const baseSlug = slugify(novelTitle)
-            let slug = baseSlug
-            let slugCounter = 1
+                if (!updatedNovel) throw new Error("Không thể replace truyện đã tồn tại")
 
-            // Đảm bảo slug là duy nhất
-            while (await prisma.novel.findUnique({ where: { slug } })) {
-                slug = `${baseSlug}-${slugCounter}`
-                slugCounter++
-            }
+                targetNovelId = updatedNovel.id
+                responseStatus = 200
+                replaced = true
 
-            const createData: any = {
-                title: novelTitle,
-                slug,
-                authorName: novelAuthor,
-                description: novelDesc,
-                status: importDefaultStatus,
-                coverUrl,
-                seriesId: selectedSeriesId,
-                uploaderId: session.user.id,
-                totalChapters: chapters.length,
-            }
-
-            if (resolvedGenreIds.length > 0) {
-                createData.genres = {
-                    create: resolvedGenreIds.map((genreId) => ({
-                        genre: { connect: { id: genreId } },
-                    })),
+                if (duplicatedNovel.coverUrl && duplicatedNovel.coverUrl !== coverUrl) {
+                    await deleteR2ObjectByUrl(duplicatedNovel.coverUrl).catch(() => { })
                 }
-            }
+            } else {
+                const baseSlug = slugify(novelTitle)
+                let slug = baseSlug
+                let slugCounter = 1
+                while (await prisma.novel.findUnique({ where: { slug } })) {
+                    slug = `${baseSlug}-${slugCounter}`
+                    slugCounter++
+                }
 
-            const createdNovel = await prisma.novel.create({ data: createData })
-            targetNovelId = createdNovel.id
+                const createData: any = {
+                    title: novelTitle,
+                    slug,
+                    authorName: novelAuthor,
+                    description: novelDesc,
+                    status: importDefaultStatus,
+                    coverUrl,
+                    seriesId: selectedSeriesId,
+                    uploaderId: session.user.id,
+                    totalChapters: chapters.length,
+                }
+                if (resolvedGenreIds.length > 0) {
+                    createData.genres = { create: resolvedGenreIds.map((genreId) => ({ genre: { connect: { id: genreId } } })) }
+                }
+
+                const createdNovel = await prisma.novel.create({ data: createData })
+                targetNovelId = createdNovel.id
+            }
         }
 
-        // Lưu chapters xuống MongoDB
         await connectToMongoDB()
-        await Chapter.deleteMany({ novelId: targetNovelId })
+        
+        let insertedCount = 0
+        let updatedCount = 0
 
-        const chapterDocs = chapters.map((ch: any, i: number) => ({
-            novelId: targetNovelId,
-            number: ch.finalNumber || (i + 1),
-            volumeNumber: ch.volumeNumber ?? null,
-            volumeTitle: ch.volumeTitle ?? null,
-            volumeChapterNumber: ch.volumeChapterNumber ?? null,
-            title: ch.title,
-            content: ch.content,
-            views: 0,
-        }))
+        if (!isAppending) {
+            await Chapter.deleteMany({ novelId: targetNovelId })
+            const finalChapterDocs = chapters.map((ch: any, i: number) => ({
+                novelId: targetNovelId,
+                number: ch.finalNumber || (i + 1),
+                volumeNumber: ch.volumeNumber ?? null,
+                volumeTitle: ch.volumeTitle ?? null,
+                volumeChapterNumber: ch.volumeChapterNumber ?? null,
+                title: ch.title,
+                content: ch.content,
+                views: 0,
+            }))
+            if (finalChapterDocs.length > 0) {
+                await Chapter.insertMany(finalChapterDocs)
+                insertedCount = finalChapterDocs.length
+            }
+        } else {
+            const bulkOps = chapters.map((ch: any) => {
+                const candidateNumber = ch.detectedChapterNumber || ch.finalNumber
+                return {
+                    updateOne: {
+                        filter: { novelId: targetNovelId, number: candidateNumber },
+                        update: {
+                            $set: {
+                                volumeNumber: ch.volumeNumber ?? null,
+                                volumeTitle: ch.volumeTitle ?? null,
+                                volumeChapterNumber: ch.volumeChapterNumber ?? null,
+                                title: ch.title,
+                                content: ch.content,
+                            },
+                        },
+                        upsert: true,
+                    }
+                }
+            })
+            
+            if (bulkOps.length > 0) {
+                const writeResult = await Chapter.bulkWrite(bulkOps)
+                insertedCount = writeResult.upsertedCount || 0
+                updatedCount = writeResult.modifiedCount || 0
+            }
 
-        if (chapterDocs.length > 0) {
-            await Chapter.insertMany(chapterDocs)
+            const totalAfterMerge = await Chapter.countDocuments({ novelId: targetNovelId })
+            await prisma.novel.update({
+                where: { id: targetNovelId },
+                data: { totalChapters: totalAfterMerge },
+            })
         }
 
         const novelAfterWrite = await prisma.novel.findUnique({ where: { id: targetNovelId } })
@@ -1240,7 +1301,7 @@ export async function POST(req: Request) {
         return NextResponse.json({
             ...novelAfterWrite,
             parserInfo,
-            hasCoverFromEpub: !!coverUrl,
+            hasCoverFromEpub: !!finalCoverUrl,
             detectedGenres: detectedGenreNames,
             replaced,
         }, { status: responseStatus })

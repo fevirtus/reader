@@ -7,8 +7,8 @@ import { useAuth } from "./auth-context"
 interface BookmarkContextType {
   bookmarks: Bookmark[]
   isBookmarked: (novelId: string) => boolean
-  toggleBookmark: (novelId: string) => void
-  updateProgress: (novelId: string, chapterId: string, chapterNumber: number) => void
+  toggleBookmark: (novelId: string) => Promise<void>
+  updateProgress: (novelId: string, chapterId: string, chapterNumber: number) => Promise<void>
   getProgress: (novelId: string) => Bookmark | undefined
 }
 
@@ -18,26 +18,26 @@ export function BookmarkProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
 
-  useEffect(() => {
-    let mounted = true
-    const fetchBookmarks = async () => {
-      if (!user) {
-        setBookmarks([])
-        return
-      }
-      try {
-        const res = await fetch("/api/user/bookmarks")
-        if (res.ok) {
-          const data = await res.json()
-          if (mounted) setBookmarks(data)
-        }
-      } catch (e) {
-        console.error("Failed to fetch bookmarks", e)
-      }
+  const fetchBookmarks = useCallback(async () => {
+    if (!user) {
+      setBookmarks([])
+      return
     }
-    fetchBookmarks()
-    return () => { mounted = false }
+
+    try {
+      const res = await fetch("/api/user/bookmarks")
+      if (!res.ok) return
+
+      const data = await res.json()
+      setBookmarks(Array.isArray(data) ? data : [])
+    } catch (e) {
+      console.error("Failed to fetch bookmarks", e)
+    }
   }, [user])
+
+  useEffect(() => {
+    fetchBookmarks()
+  }, [fetchBookmarks])
 
   const toggleBookmark = useCallback(async (novelId: string) => {
     if (!user) return
@@ -52,14 +52,22 @@ export function BookmarkProvider({ children }: { children: ReactNode }) {
     })
 
     try {
-      await fetch("/api/user/bookmarks", {
+      const res = await fetch("/api/user/bookmarks", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "toggle", novelId })
       })
+
+      if (!res.ok) {
+        throw new Error("Không thể cập nhật đánh dấu")
+      }
+
+      await fetchBookmarks()
     } catch (e) {
       console.error(e)
+      await fetchBookmarks()
     }
-  }, [user])
+  }, [fetchBookmarks, user])
 
   const updateProgress = useCallback(async (novelId: string, chapterId: string, chapterNumber: number) => {
     if (!user) return
@@ -74,14 +82,22 @@ export function BookmarkProvider({ children }: { children: ReactNode }) {
     })
 
     try {
-      await fetch("/api/user/bookmarks", {
+      const res = await fetch("/api/user/bookmarks", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "updateProgress", novelId, lastChapterId: chapterId, lastChapterNumber: chapterNumber })
       })
+
+      if (!res.ok) {
+        throw new Error("Không thể cập nhật tiến độ")
+      }
+
+      await fetchBookmarks()
     } catch (e) {
       console.error(e)
+      await fetchBookmarks()
     }
-  }, [user])
+  }, [fetchBookmarks, user])
 
   const getProgress = useCallback((novelId: string) => {
     return bookmarks.find((b) => b.novelId === novelId)

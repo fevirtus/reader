@@ -48,6 +48,7 @@ model User {
   comments      Comment[]
   bookmarks     Bookmark[]
   novels        Novel[]   @relation("AuthorNovels") // Truyện do người này (MOD/ADMIN) đăng
+  settings      UserSetting?
 }
 
 model VerificationToken {
@@ -56,6 +57,17 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model UserSetting {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  fontSize      Float    @default(18)
+  lineHeight    Float    @default(1.8)
+  letterSpacing Float    @default(0)
+  fontFamily    String   @default("font-serif")
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // Custom App Schema

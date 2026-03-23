@@ -68,6 +68,55 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
   const [fontSize, setFontSize] = useState(18)
   const [lineHeight, setLineHeight] = useState(1.8)
   const [letterSpacing, setLetterSpacing] = useState(0)
+  const [fontFamily, setFontFamily] = useState("font-serif")
+
+  useEffect(() => {
+    // Dùng local storage chạy tạm thời gian đầu để khỏi giật màn hình
+    const savedFontSize = localStorage.getItem("reader_fontSize")
+    const savedLineHeight = localStorage.getItem("reader_lineHeight")
+    const savedLetterSpacing = localStorage.getItem("reader_letterSpacing")
+    const savedFontFamily = localStorage.getItem("reader_fontFamily")
+
+    if (savedFontSize) setFontSize(Number(savedFontSize))
+    if (savedLineHeight) setLineHeight(Number(savedLineHeight))
+    if (savedLetterSpacing) setLetterSpacing(Number(savedLetterSpacing))
+    if (savedFontFamily) setFontFamily(savedFontFamily)
+
+    // Đồng bộ Settings từ DB về (Ghi đè nếu có)
+    fetch("/api/user/settings")
+      .then(res => res.json())
+      .then(data => {
+        if (data && !data.error && data.fontSize) {
+          setFontSize(data.fontSize)
+          setLineHeight(data.lineHeight)
+          setLetterSpacing(data.letterSpacing)
+          setFontFamily(data.fontFamily)
+          
+          localStorage.setItem("reader_fontSize", data.fontSize.toString())
+          localStorage.setItem("reader_lineHeight", data.lineHeight.toString())
+          localStorage.setItem("reader_letterSpacing", data.letterSpacing.toString())
+          localStorage.setItem("reader_fontFamily", data.fontFamily)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem("reader_fontSize", fontSize.toString())
+    localStorage.setItem("reader_lineHeight", lineHeight.toString())
+    localStorage.setItem("reader_letterSpacing", letterSpacing.toString())
+    localStorage.setItem("reader_fontFamily", fontFamily)
+
+    const timer = setTimeout(() => {
+      fetch("/api/user/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fontSize, lineHeight, letterSpacing, fontFamily })
+      }).catch(() => {})
+    }, 1000)
+
+    return () => clearTimeout(timer)
+  }, [fontSize, lineHeight, letterSpacing, fontFamily])
 
   return (
     <>
@@ -134,6 +183,7 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
               fontSize={fontSize} setFontSize={setFontSize}
               lineHeight={lineHeight} setLineHeight={setLineHeight}
               letterSpacing={letterSpacing} setLetterSpacing={setLetterSpacing}
+              fontFamily={fontFamily} setFontFamily={setFontFamily}
             />
           </PopoverContent>
         </Popover>
@@ -158,10 +208,13 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
 
     {/* Inject styles OUTSIDE the popover so it survives */}
     <style>{`
-      .chapter-content {
+      .chapter-content, .chapter-content p {
         font-size: ${fontSize}px !important;
         line-height: ${lineHeight} !important;
         letter-spacing: ${letterSpacing}px !important;
+        font-family: ${fontFamily === 'font-serif' ? 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif' : 
+                       fontFamily === 'font-sans' ? 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif' : 
+                       'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'} !important;
       }
     `}</style>
 
