@@ -41,6 +41,9 @@ MONGODB_URI="mongodb://user:password@localhost:27017/reader?authSource=admin"
 NEXTAUTH_SECRET="your-super-secret-key"
 NEXTAUTH_URL="http://localhost:3000"
 
+# API backend dùng chung cho web + mobile
+READER_API_ORIGIN="http://localhost:8000"
+
 # Cấu hình Google Login
 GOOGLE_CLIENT_ID="your_google_client_id"
 GOOGLE_CLIENT_SECRET="your_google_client_secret"
@@ -79,6 +82,8 @@ npx prisma generate
 pnpm dev
 ```
 Truy cập vào [http://localhost:3000](http://localhost:3000) để xem ứng dụng.
+
+Lưu ý: các endpoint user-facing đã migrate (`/api/genres`, `/api/novels/*`, `/api/truyen/*`, `/api/chapters/*`, `/api/user/*`, `/api/auth/mobile-login`) sẽ được proxy sang `READER_API_ORIGIN`.
 
 ---
 

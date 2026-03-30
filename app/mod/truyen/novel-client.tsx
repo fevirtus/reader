@@ -835,7 +835,7 @@ export function NovelClient() {
 
         const data = await res.json()
         if (!res.ok) {
-            throw new Error(data.error || "Không thể phân tích EPUB")
+            throw new Error(data.error || data.detail || "Không thể phân tích EPUB")
         }
 
         setEpubPreviewData(data)
@@ -1199,7 +1199,7 @@ export function NovelClient() {
                     setNewSeriesName("")
                 }
                 if (data.genres && Array.isArray(data.genres)) {
-                    setSelectedGenres(data.genres.map((g: any) => g.genreId))
+                    setSelectedGenres(data.genres.map((g: any) => g.id))
                 } else {
                     setSelectedGenres([])
                 }

@@ -1,10 +1,12 @@
 // Server component instead of client component
+import Link from "next/link"
 import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { NovelCard } from "@/components/novel-card"
 import { prisma } from "@/lib/prisma"
 
 export const dynamic = "force-dynamic"
+const PAGE_SIZE = 20
 
 function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(rows: T[]): T[] {
   const pickedSeries = new Set<string>()
@@ -34,6 +36,7 @@ export default async function SearchPage({
   const sortBy = resolvedParams.sort || "latest"
   const genreFilter = resolvedParams.genreFilter || "all"
   const statusFilter = resolvedParams.statusFilter || "all"
+  const requestedPage = Math.max(1, Number(resolvedParams.page || "1") || 1)
 
   // Build where clause
   let where: any = {}
@@ -42,6 +45,7 @@ export default async function SearchPage({
     where.OR = [
       { title: { contains: q, mode: "insensitive" } },
       { authorName: { contains: q, mode: "insensitive" } },
+      { originalAuthorName: { contains: q, mode: "insensitive" } },
       { series: { name: { contains: q, mode: "insensitive" } } },
     ]
   }
@@ -77,24 +81,74 @@ export default async function SearchPage({
       orderBy = { updatedAt: "desc" }
   }
 
-  const filteredNovelsRaw = await prisma.novel.findMany({
-    where,
-    orderBy,
-    include: {
-      series: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
+  let filteredNovels: any[] = []
+  let totalResults = 0
+  let totalPages = 1
+  let currentPage = requestedPage
+
+  if (q) {
+    totalResults = await prisma.novel.count({ where })
+    totalPages = Math.max(1, Math.ceil(totalResults / PAGE_SIZE))
+    currentPage = Math.min(currentPage, totalPages)
+
+    filteredNovels = await prisma.novel.findMany({
+      where,
+      orderBy,
+      include: {
+        series: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
         },
       },
-    },
-    take: 80,
-  })
+      skip: (currentPage - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    })
+  } else {
+    const filteredNovelsRaw = await prisma.novel.findMany({
+      where,
+      orderBy,
+      include: {
+        series: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
+      take: 500,
+    })
 
-  const filteredNovels = q ? filteredNovelsRaw.slice(0, 20) : collapseSeriesRows(filteredNovelsRaw).slice(0, 20)
+    const collapsed = collapseSeriesRows(filteredNovelsRaw)
+    totalResults = collapsed.length
+    totalPages = Math.max(1, Math.ceil(totalResults / PAGE_SIZE))
+    currentPage = Math.min(currentPage, totalPages)
+    filteredNovels = collapsed.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  }
 
-  const genres = await prisma.genre.findMany()
+  const genres = await prisma.genre.findMany({ orderBy: { name: "asc" } })
+
+  const pageRangeStart = Math.max(1, currentPage - 2)
+  const pageRangeEnd = Math.min(totalPages, currentPage + 2)
+  const pageNumbers = Array.from(
+    { length: pageRangeEnd - pageRangeStart + 1 },
+    (_, index) => pageRangeStart + index
+  )
+
+  const buildPageHref = (page: number) => {
+    const params = new URLSearchParams()
+
+    if (q) params.set("q", q)
+    if (sortBy !== "latest") params.set("sort", sortBy)
+    if (genreFilter !== "all") params.set("genreFilter", genreFilter)
+    if (statusFilter !== "all") params.set("statusFilter", statusFilter)
+    params.set("page", String(page))
+
+    return `/tim-kiem?${params.toString()}`
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -140,7 +194,9 @@ export default async function SearchPage({
       </form>
 
       {/* Results */}
-      <p className="mb-4 text-sm text-muted-foreground">{filteredNovels.length} kết quả</p>
+      <p className="mb-4 text-sm text-muted-foreground">
+        {totalResults} kết quả {totalResults > 0 && `(Trang ${currentPage}/${totalPages})`}
+      </p>
       {filteredNovels.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
           <Search className="mb-3 h-10 w-10 text-muted-foreground/40" />
@@ -152,6 +208,34 @@ export default async function SearchPage({
           {filteredNovels.map((novel) => (
             <NovelCard key={novel.id} novel={novel} />
           ))}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+          <Link
+            href={buildPageHref(Math.max(1, currentPage - 1))}
+            className={`rounded-md border px-3 py-1.5 text-sm ${currentPage <= 1 ? "pointer-events-none opacity-50" : "hover:bg-muted"}`}
+          >
+            Trước
+          </Link>
+
+          {pageNumbers.map((page) => (
+            <Link
+              key={page}
+              href={buildPageHref(page)}
+              className={`rounded-md border px-3 py-1.5 text-sm ${page === currentPage ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+            >
+              {page}
+            </Link>
+          ))}
+
+          <Link
+            href={buildPageHref(Math.min(totalPages, currentPage + 1))}
+            className={`rounded-md border px-3 py-1.5 text-sm ${currentPage >= totalPages ? "pointer-events-none opacity-50" : "hover:bg-muted"}`}
+          >
+            Sau
+          </Link>
         </div>
       )}
     </div>

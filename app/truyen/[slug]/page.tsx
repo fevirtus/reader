@@ -101,7 +101,7 @@ export default async function NovelDetailPage({
       volumeTitle: (c as any).volumeTitle ?? null,
       volumeChapterNumber: (c as any).volumeChapterNumber ?? null,
       title: c.title,
-      createdAt: (c.createdAt as Date).toISOString(),
+      createdAt: c.createdAt ? (c.createdAt as Date).toISOString() : new Date().toISOString(),
       views: c.views || 0,
       content: ""
     }))

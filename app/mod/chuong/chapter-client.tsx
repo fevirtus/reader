@@ -44,6 +44,7 @@ const CHAPTER_REGEX_PRESETS = [
 ]
 
 interface Chapter {
+    id?: string
     _id: string
     number: number
     volumeNumber?: number | null
@@ -172,7 +173,6 @@ function ChapterManager() {
         try {
             const formData = new FormData()
             formData.append("file", epubFile)
-            formData.append("title", "Append Ebook")
             formData.append("splitMode", epubSplitMode)
             formData.append("chapterRegex", epubSplitMode === "regex" ? getEpubSourceRegex() : "")
             formData.append("chapterRegexPreset", epubRegexPreset)
@@ -190,7 +190,7 @@ function ChapterManager() {
             })
 
             if (!result.ok) {
-                throw new Error(result.data.error || "Phân tích EPUB thất bại")
+                throw new Error(result.data.error || result.data.detail || "Phân tích EPUB thất bại")
             }
 
             setEpubPreviewData(result.data)
@@ -212,7 +212,6 @@ function ChapterManager() {
         try {
             const formData = new FormData()
             formData.append("file", epubFile)
-            formData.append("title", "Append Ebook")
             formData.append("splitMode", epubSplitMode)
             formData.append("chapterRegex", epubSplitMode === "regex" ? getEpubSourceRegex() : "")
             formData.append("chapterRegexPreset", epubRegexPreset)
@@ -229,7 +228,7 @@ function ChapterManager() {
             })
 
             if (!result.ok) {
-                throw new Error(result.data.error || "Nhập EPUB thất bại")
+                throw new Error(result.data.error || result.data.detail || "Nhập EPUB thất bại")
             }
 
             toast.success(`Nhập EPUB thành công! Đã chêm thêm ${result.data.parserInfo?.chaptersFinal || result.data.totalChapters} chương.`, { id: toastId })
@@ -307,9 +306,10 @@ function ChapterManager() {
     const fetchAllChaptersForOptimize = async (): Promise<Chapter[]> => {
         if (!novelId) return []
 
-        const limit = 200
+        const limit = 100
         let page = 1
         let total = 1
+        let expectedTotal = 0
         const all: Chapter[] = []
 
         while (page <= total) {
@@ -319,9 +319,16 @@ function ChapterManager() {
             }
 
             const data = await res.json()
+            if (page === 1) {
+                expectedTotal = Number(data.totalChapters || 0)
+            }
             all.push(...(data.chapters || []))
             total = data.totalPages || 1
             page++
+        }
+
+        if (expectedTotal > 0 && all.length < expectedTotal) {
+            throw new Error(`Chỉ tải được ${all.length}/${expectedTotal} chương. Vui lòng thử lại để tối ưu toàn bộ truyện.`)
         }
 
         return all.sort((a, b) => a.number - b.number)
@@ -351,7 +358,7 @@ function ChapterManager() {
             })
 
             const resData = await res.json()
-            if (!res.ok) throw new Error(resData.error || "Thêm mới thất bại")
+            if (!res.ok) throw new Error(resData.error || resData.detail || "Thêm mới thất bại")
 
             toast.success("Đã đăng chương mới thành công!")
             setOpenAdd(false)
@@ -478,17 +485,27 @@ function ChapterManager() {
         if (optimizedChapters.length === 0) return
         setOptimizing(true)
         try {
-            const sourceById = new Map(optimizeSourceChapters.map((ch) => [ch._id, ch]))
+            const sourceById = new Map(
+                optimizeSourceChapters
+                    .map((ch) => {
+                        const key = ch._id || ch.id
+                        return key ? [key, ch] : null
+                    })
+                    .filter((row): row is [string, Chapter] => !!row)
+            )
             const updates = optimizedChapters
                 .filter((ch) => {
-                    const old = sourceById.get(ch._id)
+                    const key = ch._id || ch.id
+                    if (!key) return false
+                    const old = sourceById.get(key)
                     return !!old && (old.number !== ch.number || old.title !== ch.title)
                 })
                 .map((ch) => ({
-                    id: ch._id,
+                    id: ch._id || ch.id,
                     title: ch.title,
                     number: ch.number
                 }))
+                .filter((item): item is { id: string; title: string; number: number } => !!item.id)
 
             if (updates.length === 0) {
                 toast.info("Không có thay đổi nào cần lưu")
@@ -531,7 +548,7 @@ function ChapterManager() {
             })
             if (!res.ok) {
                 const data = await res.json()
-                throw new Error(data.error || "Xóa thất bại")
+                throw new Error(data.error || data.detail || "Xóa thất bại")
             }
             toast.success("Đã xóa chương thành công")
             setOpenDelete(false)
