@@ -29,10 +29,6 @@ const nextConfig = {
           destination: `${readerApiOrigin}/api/chapters/:path*`,
         },
         {
-          source: "/api/user/:path*",
-          destination: `${readerApiOrigin}/api/user/:path*`,
-        },
-        {
           source: "/api/auth/mobile-login",
           destination: `${readerApiOrigin}/api/auth/mobile-login`,
         },

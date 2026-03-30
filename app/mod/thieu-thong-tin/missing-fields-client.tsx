@@ -49,12 +49,30 @@ const missingKeyLabel: Record<MissingKey, string> = {
 
 const allMissingKeys: MissingKey[] = ["author", "cover", "description", "genres"]
 
+function isBlank(value: unknown): boolean {
+    return typeof value !== "string" || value.trim() === ""
+}
+
+function normalizeMissingFlags(row: any): Record<MissingKey, boolean> {
+    const safeGenres = Array.isArray(row?.genres) ? row.genres : []
+    const incoming = row?.missing && typeof row.missing === "object" ? row.missing : {}
+
+    return {
+        author: typeof incoming.author === "boolean" ? incoming.author : isBlank(row?.authorName),
+        cover: typeof incoming.cover === "boolean" ? incoming.cover : isBlank(row?.coverUrl),
+        description: typeof incoming.description === "boolean" ? incoming.description : isBlank(row?.description),
+        genres: typeof incoming.genres === "boolean" ? incoming.genres : safeGenres.length === 0,
+    }
+}
+
 function toDraft(novel: MissingNovel): RowDraft {
+    const safeGenres = Array.isArray(novel.genres) ? novel.genres : []
+
     return {
         authorName: novel.authorName || "",
         coverUrl: novel.coverUrl || "",
         description: novel.description || "",
-        genreIds: novel.genres.map((genre) => genre.id),
+        genreIds: safeGenres.map((genre) => genre.id),
     }
 }
 
@@ -312,7 +330,12 @@ export function MissingFieldsClient() {
             }
 
             const data = await res.json()
-            const rows: MissingNovel[] = Array.isArray(data?.items) ? data.items : []
+            const rawRows: any[] = Array.isArray(data?.items) ? data.items : []
+            const rows: MissingNovel[] = rawRows.map((row) => ({
+                ...row,
+                genres: Array.isArray(row?.genres) ? row.genres : [],
+                missing: normalizeMissingFlags(row),
+            }))
 
             setItems(rows)
             setSelectedNovelIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)))
