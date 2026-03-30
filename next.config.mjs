@@ -41,10 +41,6 @@ const nextConfig = {
           destination: `${readerApiOrigin}/api/health`,
         },
           {
-            source: "/api/mod/:path*",
-            destination: `${readerApiOrigin}/api/mod/:path*`,
-          },
-          {
             source: "/api/dev/:path*",
             destination: `${readerApiOrigin}/api/dev/:path*`,
           },

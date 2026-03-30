@@ -1,46 +1,35 @@
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
 import Link from "next/link"
 import { Sparkles } from "lucide-react"
+import { cookies } from "next/headers"
+
+const readerApiOrigin = (process.env.READER_API_ORIGIN || "http://localhost:8000").replace(/\/+$/, "")
 
 export default async function ModDashboardPage() {
     const session = await getServerSession(authOptions)
 
-    const novelWhere = session?.user.role === "ADMIN"
-        ? {}
-        : {
-            OR: [
-                { uploaderId: session?.user.id },
-                { uploaderId: null },
-            ],
+    let novelCount = 0
+    let totalViews = 0
+    let commentCount = 0
+    let seriesCount = 0
+
+    try {
+        const cookieHeader = (await cookies()).toString()
+        const res = await fetch(`${readerApiOrigin}/api/mod/overview`, {
+            cache: "no-store",
+            headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+        })
+        if (res.ok) {
+            const data = await res.json()
+            novelCount = Number(data?.novelCount || 0)
+            totalViews = Number(data?.totalViews || 0)
+            commentCount = Number(data?.commentCount || 0)
+            seriesCount = Number(data?.seriesCount || 0)
         }
-
-    const [novelCount, novelViewsAgg, commentCount, seriesCount] = await Promise.all([
-        prisma.novel.count({ where: novelWhere }),
-        prisma.novel.aggregate({
-            where: novelWhere,
-            _sum: { views: true },
-        }),
-        prisma.comment.count({
-            where: {
-                novel: novelWhere,
-            },
-        }),
-        prisma.series.count({
-            where: session?.user.role === "ADMIN"
-                ? {}
-                : {
-                    OR: [
-                        { novels: { some: { uploaderId: session?.user.id } } },
-                        { novels: { some: { uploaderId: null } } },
-                        { novels: { none: {} } },
-                    ],
-                },
-        }),
-    ])
-
-    const totalViews = novelViewsAgg._sum.views || 0
+    } catch (error) {
+        console.error("Failed to fetch mod overview", error)
+    }
 
     return (
         <div>

@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { BookOpen, Sparkles, Flame, Heart, Swords, Building2, Rocket, Crown, Laugh, Search, Shield } from "lucide-react"
-import { prisma } from "@/lib/prisma"
+import { readerApiFetch } from "@/lib/server-api"
 
 const iconMap: Record<string, React.ReactNode> = {
   Sparkles: <Sparkles className="h-6 w-6" />,
@@ -17,17 +17,20 @@ const iconMap: Record<string, React.ReactNode> = {
 
 export const dynamic = "force-dynamic"
 
+type GenreItem = {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  icon: string | null
+  novelCount: number
+}
+
 export default async function GenresPage() {
-  let genres: any[] = []
+  let genres: GenreItem[] = []
 
   try {
-    genres = await prisma.genre.findMany({
-      include: {
-        _count: {
-          select: { novels: true }
-        }
-      }
-    })
+    genres = await readerApiFetch<GenreItem[]>("/api/genres")
   } catch (error) {
     console.error("Failed to fetch genres during build/runtime", error)
   }
@@ -37,7 +40,7 @@ export default async function GenresPage() {
       <h1 className="mb-6 text-2xl font-bold text-foreground">Thể Loại Truyện</h1>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {genres.map((genre) => {
-          const novelCount = genre._count.novels
+          const novelCount = genre.novelCount
           return (
             <Link
               key={genre.id}

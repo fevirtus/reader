@@ -1,10 +1,35 @@
 import Link from "next/link"
 import { ChevronLeft } from "lucide-react"
-import { prisma } from "@/lib/prisma"
 import { NovelCard } from "@/components/novel-card"
 import { notFound } from "next/navigation"
+import { readerApiFetch, readerApiFetchNullable } from "@/lib/server-api"
 
 export const dynamic = "force-dynamic"
+
+type GenreItem = {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+}
+
+type BrowseNovel = {
+  id: string
+  slug: string
+  title: string
+  authorName: string
+  coverColor: string | null
+  coverUrl: string | null
+  rating: number
+  views: number
+  totalChapters: number
+  status: string
+  seriesId?: string | null
+}
+
+type BrowseResponse = {
+  items: BrowseNovel[]
+}
 
 function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(rows: T[]): T[] {
   const pickedSeries = new Set<string>()
@@ -27,42 +52,16 @@ function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(
 export default async function GenreDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
 
-  const genre = await prisma.genre.findUnique({
-    where: { slug }
-  })
+  const genres = await readerApiFetch<GenreItem[]>("/api/genres")
+  const genre = genres.find((item) => item.slug === slug) || null
 
   if (!genre) {
     notFound()
   }
 
-  const allNovelsRaw = await prisma.novel.findMany({
-    where: {
-      genres: {
-        some: {
-          genreId: genre.id
-        }
-      }
-    },
-    select: {
-      id: true,
-      slug: true,
-      title: true,
-      authorName: true,
-      coverColor: true,
-      coverUrl: true,
-      rating: true,
-      views: true,
-      totalChapters: true,
-      status: true,
-      seriesId: true,
-    },
-    orderBy: {
-      updatedAt: "desc"
-    },
-    take: 80
-  })
+  const browse = await readerApiFetch<BrowseResponse>(`/api/novels/browse?genre=${encodeURIComponent(slug)}&sort=latest&page=1&limit=80`)
 
-  const allNovels = collapseSeriesRows(allNovelsRaw).slice(0, 20)
+  const allNovels = collapseSeriesRows(browse.items).slice(0, 20)
 
   // Basic layout without sort for purely server side representation without search params. Optional searchParams can be added later if needed.
   return (

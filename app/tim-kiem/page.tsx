@@ -1,12 +1,38 @@
-// Server component instead of client component
 import Link from "next/link"
 import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { NovelCard } from "@/components/novel-card"
-import { prisma } from "@/lib/prisma"
+import { readerApiFetch } from "@/lib/server-api"
 
 export const dynamic = "force-dynamic"
 const PAGE_SIZE = 20
+
+type BrowseNovel = {
+  id: string
+  slug: string
+  title: string
+  authorName: string
+  coverColor: string | null
+  coverUrl: string | null
+  rating: number
+  views: number
+  totalChapters: number
+  status: string
+  seriesId?: string | null
+}
+
+type BrowseResponse = {
+  items: BrowseNovel[]
+  totalCount: number
+  totalPages: number
+  currentPage: number
+}
+
+type GenreItem = {
+  id: string
+  name: string
+  slug: string
+}
 
 function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(rows: T[]): T[] {
   const pickedSeries = new Set<string>()
@@ -26,6 +52,11 @@ function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(
   return output
 }
 
+function buildBrowsePath(params: Record<string, string>) {
+  const search = new URLSearchParams(params)
+  return `/api/novels/browse?${search.toString()}`
+}
+
 export default async function SearchPage({
   searchParams,
 }: {
@@ -38,98 +69,46 @@ export default async function SearchPage({
   const statusFilter = resolvedParams.statusFilter || "all"
   const requestedPage = Math.max(1, Number(resolvedParams.page || "1") || 1)
 
-  // Build where clause
-  let where: any = {}
+  const genres = await readerApiFetch<GenreItem[]>("/api/genres")
 
-  if (q) {
-    where.OR = [
-      { title: { contains: q, mode: "insensitive" } },
-      { authorName: { contains: q, mode: "insensitive" } },
-      { originalAuthorName: { contains: q, mode: "insensitive" } },
-      { series: { name: { contains: q, mode: "insensitive" } } },
-    ]
-  }
-
-  if (genreFilter !== "all") {
-    where.genres = {
-      some: {
-        genre: {
-          slug: genreFilter
-        }
-      }
-    }
-  }
-
-  if (statusFilter !== "all") {
-    where.status = statusFilter
-  }
-
-  // Build order clause
-  let orderBy: any = {}
-  switch (sortBy) {
-    case "popular":
-      orderBy = { views: "desc" }
-      break
-    case "rating":
-      orderBy = { rating: "desc" }
-      break
-    case "name":
-      orderBy = { title: "asc" }
-      break
-    case "latest":
-    default:
-      orderBy = { updatedAt: "desc" }
-  }
-
-  let filteredNovels: any[] = []
+  let filteredNovels: BrowseNovel[] = []
   let totalResults = 0
   let totalPages = 1
   let currentPage = requestedPage
 
   if (q) {
-    totalResults = await prisma.novel.count({ where })
-    totalPages = Math.max(1, Math.ceil(totalResults / PAGE_SIZE))
-    currentPage = Math.min(currentPage, totalPages)
+    const browse = await readerApiFetch<BrowseResponse>(
+      buildBrowsePath({
+        q,
+        sort: sortBy,
+        genre: genreFilter === "all" ? "" : genreFilter,
+        status: statusFilter === "all" ? "" : statusFilter,
+        page: String(requestedPage),
+        limit: String(PAGE_SIZE),
+      })
+    )
 
-    filteredNovels = await prisma.novel.findMany({
-      where,
-      orderBy,
-      include: {
-        series: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-      },
-      skip: (currentPage - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    })
+    filteredNovels = browse.items
+    totalResults = browse.totalCount
+    totalPages = Math.max(1, browse.totalPages || 1)
+    currentPage = Math.min(requestedPage, totalPages)
   } else {
-    const filteredNovelsRaw = await prisma.novel.findMany({
-      where,
-      orderBy,
-      include: {
-        series: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-      },
-      take: 500,
-    })
+    const browse = await readerApiFetch<BrowseResponse>(
+      buildBrowsePath({
+        sort: sortBy,
+        genre: genreFilter === "all" ? "" : genreFilter,
+        status: statusFilter === "all" ? "" : statusFilter,
+        page: "1",
+        limit: "500",
+      })
+    )
 
-    const collapsed = collapseSeriesRows(filteredNovelsRaw)
+    const collapsed = collapseSeriesRows(browse.items)
     totalResults = collapsed.length
     totalPages = Math.max(1, Math.ceil(totalResults / PAGE_SIZE))
-    currentPage = Math.min(currentPage, totalPages)
+    currentPage = Math.min(requestedPage, totalPages)
     filteredNovels = collapsed.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   }
-
-  const genres = await prisma.genre.findMany({ orderBy: { name: "asc" } })
 
   const pageRangeStart = Math.max(1, currentPage - 2)
   const pageRangeEnd = Math.min(totalPages, currentPage + 2)
@@ -154,7 +133,6 @@ export default async function SearchPage({
     <div className="mx-auto max-w-6xl px-4 py-6">
       <h1 className="mb-6 text-2xl font-bold text-foreground">Tìm Kiếm Truyện</h1>
 
-      {/* Search and Filters - This requires a client component wrapper ideally, but for now we can rely on standard form submissions to update searchParams */}
       <form method="GET" action="/tim-kiem">
         <div className="relative mb-4">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -189,11 +167,10 @@ export default async function SearchPage({
             <option value="name">Theo tên</option>
           </select>
 
-          <button type="submit" className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium">Lọc</button>
+          <button type="submit" className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Lọc</button>
         </div>
       </form>
 
-      {/* Results */}
       <p className="mb-4 text-sm text-muted-foreground">
         {totalResults} kết quả {totalResults > 0 && `(Trang ${currentPage}/${totalPages})`}
       </p>

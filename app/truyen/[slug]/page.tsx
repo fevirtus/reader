@@ -7,12 +7,75 @@ import { StarRating } from "@/components/star-rating"
 import { ChapterList } from "@/components/chapter-list"
 import { CommentSection } from "@/components/comment-section"
 import { NovelDetailActions } from "./novel-detail-actions"
-import { prisma } from "@/lib/prisma"
-import connectToMongoDB from "@/lib/mongoose"
-import { Chapter } from "@/lib/models/chapter"
 import { getNovelStatusBadgeClass } from "@/lib/novel-status"
+import { readerApiFetch, readerApiFetchNullable } from "@/lib/server-api"
 
 export const dynamic = "force-dynamic"
+
+type NovelGenre = {
+  id: string
+  name: string
+  slug: string
+}
+
+type SeriesNovel = {
+  id: string
+  slug: string
+  title: string
+  status: string
+  totalChapters: number
+  coverUrl: string | null
+}
+
+type NovelDetail = {
+  id: string
+  title: string
+  slug: string
+  originalTitle: string | null
+  authorName: string
+  originalAuthorName: string | null
+  description: string | null
+  coverUrl: string | null
+  status: string
+  totalChapters: number
+  views: number
+  ratingCount: number
+  bookmarkCount: number
+  seriesId: string | null
+  genres: NovelGenre[]
+  series: {
+    id: string
+    name: string
+    slug: string
+    novels: SeriesNovel[]
+  } | null
+}
+
+type ChaptersResponse = {
+  chapters: Array<{
+    id: string
+    number: number
+    title: string
+    views: number
+    createdAt: string | null
+    volumeNumber?: number | null
+    volumeTitle?: string | null
+    volumeChapterNumber?: number | null
+  }>
+  totalChapters: number
+  totalPages: number
+}
+
+type CommentsResponse = {
+  comments: Array<{
+    id: string
+    userId: string
+    username: string
+    content: string
+    chapterId?: string | null
+    createdAt: string | null
+  }>
+}
 
 export default async function NovelDetailPage({
   params,
@@ -24,17 +87,10 @@ export default async function NovelDetailPage({
   const { slug } = await params
   const { page } = await searchParams
 
-  const currentPage = parseInt(page || "1")
+  const currentPage = Math.max(1, parseInt(page || "1", 10) || 1)
   const limit = 20
 
-  const novel = await prisma.novel.findUnique({
-    where: { slug },
-    include: {
-      genres: {
-        include: { genre: true }
-      }
-    }
-  })
+  const novel = await readerApiFetchNullable<NovelDetail>(`/api/novels/${encodeURIComponent(slug)}`)
 
   if (!novel) {
     notFound()
@@ -51,97 +107,58 @@ export default async function NovelDetailPage({
     status: string
     totalChapters: number
     coverUrl: string | null
-    updatedAt: Date
   }> = []
+  const [firstChapterData, commentsData, chapterCommentsData, chaptersData] = await Promise.all([
+    readerApiFetch<ChaptersResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/chapters?page=1&limit=1`),
+    readerApiFetch<CommentsResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/comments?page=1&limit=50`),
+    readerApiFetch<CommentsResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/comments?scope=chapter&page=1&limit=50`),
+    novel.seriesId
+      ? Promise.resolve(null)
+      : readerApiFetch<ChaptersResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/chapters?page=${currentPage}&limit=${limit}`),
+  ])
 
-  await connectToMongoDB()
+  firstChapterNumber = firstChapterData.chapters[0]?.number
 
   if (novel.seriesId) {
-    const [firstChapter, volumes] = await Promise.all([
-      Chapter.findOne({ novelId: novel.id }).sort({ number: 1 }).select("number").lean(),
-      prisma.novel.findMany({
-        where: { seriesId: novel.seriesId },
-        select: {
-          id: true,
-          slug: true,
-          title: true,
-          status: true,
-          totalChapters: true,
-          coverUrl: true,
-          updatedAt: true,
-        },
-        orderBy: { createdAt: "asc" },
-      }),
-    ])
-
-    firstChapterNumber = (firstChapter as any)?.number
-    seriesVolumes = volumes
-  } else {
-    const skip = (currentPage - 1) * limit
-    const [chapters, chaptersCount, firstChapter] = await Promise.all([
-      Chapter.find({ novelId: novel.id })
-        .sort({ number: 1 })
-        .skip(skip)
-        .limit(limit)
-        .select("id novelId number title createdAt views volumeNumber volumeTitle volumeChapterNumber")
-        .lean(),
-      Chapter.countDocuments({ novelId: novel.id }),
-      Chapter.findOne({ novelId: novel.id }).sort({ number: 1 }).select("number").lean(),
-    ])
-
-    totalChapters = chaptersCount
-    totalPages = Math.ceil(totalChapters / limit)
-    firstChapterNumber = (firstChapter as any)?.number
-
-    formattedChapters = chapters.map(c => ({
-      id: c._id.toString(),
-      novelId: c.novelId,
-      number: c.number,
-      volumeNumber: (c as any).volumeNumber ?? null,
-      volumeTitle: (c as any).volumeTitle ?? null,
-      volumeChapterNumber: (c as any).volumeChapterNumber ?? null,
-      title: c.title,
-      createdAt: c.createdAt ? (c.createdAt as Date).toISOString() : new Date().toISOString(),
-      views: c.views || 0,
-      content: ""
+    seriesVolumes = novel.series?.novels || []
+  } else if (chaptersData) {
+    totalChapters = chaptersData.totalChapters
+    totalPages = Math.max(1, chaptersData.totalPages || 1)
+    formattedChapters = chaptersData.chapters.map((chapter) => ({
+      id: chapter.id,
+      novelId: novel.id,
+      number: chapter.number,
+      volumeNumber: chapter.volumeNumber ?? null,
+      volumeTitle: chapter.volumeTitle ?? null,
+      volumeChapterNumber: chapter.volumeChapterNumber ?? null,
+      title: chapter.title,
+      createdAt: chapter.createdAt ? chapter.createdAt.split("T")[0] : "",
+      views: chapter.views || 0,
+      content: "",
     }))
   }
 
-  const commentsData = await prisma.comment.findMany({
-    where: { novelId: novel.id, chapterId: null },
-    include: { user: true },
-    orderBy: { createdAt: "desc" }
-  })
-
-  // Format explicitly as the CommentProp type
-  const comments = commentsData.map(c => ({
-    id: c.id,
-    userId: c.user.id,
-    username: c.user.name || "User",
-    avatarColor: c.user.image || "bg-primary",
-    novelId: c.novelId,
-    content: c.content,
-    createdAt: c.createdAt.toISOString().split("T")[0]
+  const comments = commentsData.comments.map((comment) => ({
+    id: comment.id,
+    userId: comment.userId,
+    username: comment.username || "User",
+    avatarColor: "bg-primary",
+    novelId: novel.id,
+    content: comment.content,
+    createdAt: comment.createdAt ? comment.createdAt.split("T")[0] : "",
   }))
 
-  const chapterCommentsData = await prisma.comment.findMany({
-    where: { novelId: novel.id, chapterId: { not: null } },
-    include: { user: true },
-    orderBy: { createdAt: "desc" }
-  })
-
-  // Format explicitly as the CommentProp type
-  const chapterComments = chapterCommentsData.map(c => ({
-    id: c.id,
-    userId: c.user.id,
-    username: c.user.name || "User",
-    avatarColor: c.user.image || "bg-primary",
-    novelId: c.novelId,
-    content: c.content,
-    createdAt: c.createdAt.toISOString().split("T")[0]
+  const chapterComments = chapterCommentsData.comments.map((comment) => ({
+    id: comment.id,
+    userId: comment.userId,
+    username: comment.username || "User",
+    avatarColor: "bg-primary",
+    novelId: novel.id,
+    content: comment.content,
+    createdAt: comment.createdAt ? comment.createdAt.split("T")[0] : "",
   }))
 
-  const novelGenres = novel.genres.map(ng => ng.genre) || []
+  const novelGenres = novel.genres || []
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -222,7 +239,7 @@ export default async function NovelDetailPage({
       {/* Description */}
       <section className="mt-8">
         <h2 className="mb-3 text-lg font-bold text-foreground">Giới Thiệu</h2>
-        <div className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap">{novel.description}</div>
+        <div className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap">{novel.description || ""}</div>
       </section>
 
       {/* Chapter list or series volumes */}
