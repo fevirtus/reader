@@ -98,16 +98,16 @@ export default async function SearchPage({
         sort: sortBy,
         genre: genreFilter === "all" ? "" : genreFilter,
         status: statusFilter === "all" ? "" : statusFilter,
-        page: "1",
-        limit: "500",
+        page: String(requestedPage),
+        limit: String(PAGE_SIZE),
+        collapse_series: "true",
       })
     )
 
-    const collapsed = collapseSeriesRows(browse.items)
-    totalResults = collapsed.length
-    totalPages = Math.max(1, Math.ceil(totalResults / PAGE_SIZE))
+    filteredNovels = browse.items
+    totalResults = browse.totalCount
+    totalPages = Math.max(1, browse.totalPages || 1)
     currentPage = Math.min(requestedPage, totalPages)
-    filteredNovels = collapsed.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   }
 
   const pageRangeStart = Math.max(1, currentPage - 2)

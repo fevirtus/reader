@@ -15,7 +15,7 @@ const iconMap: Record<string, React.ReactNode> = {
   Shield: <Shield className="h-6 w-6" />,
 }
 
-export const dynamic = "force-dynamic"
+export const revalidate = 300 // cache 5 phút, genres ít thay đổi
 
 type GenreItem = {
   id: string
