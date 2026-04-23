@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getToken } from "next-auth/jwt"
+import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -7,8 +7,7 @@ export const dynamic = "force-dynamic"
 const readerApiOrigin = (process.env.READER_API_ORIGIN || "http://localhost:8000").replace(/\/+$/, "")
 
 async function proxyToReaderApi(req: NextRequest, path: string[]) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
-  const accessToken = typeof (token as any)?.accessToken === "string" ? (token as any).accessToken : null
+  const accessToken = req.cookies.get(AUTH_COOKIE_NAME)?.value || null
 
   const url = new URL(req.url)
   const query = url.search || ""
@@ -16,6 +15,7 @@ async function proxyToReaderApi(req: NextRequest, path: string[]) {
 
   const headers = new Headers(req.headers)
   headers.delete("host")
+  headers.delete("cookie")
   if (accessToken) {
     headers.set("authorization", `Bearer ${accessToken}`)
   }

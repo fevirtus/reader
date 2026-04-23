@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
+import { toast } from "sonner"
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -21,6 +22,7 @@ function GoogleIcon({ className }: { className?: string }) {
 export default function LoginPage() {
   const router = useRouter()
   const { user, loginWithGoogle } = useAuth()
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
     if (user) {
@@ -28,9 +30,19 @@ export default function LoginPage() {
     }
   }, [user, router])
 
-  const handleGoogleLogin = () => {
-    loginWithGoogle()
-    router.push("/")
+  const handleGoogleLogin = async () => {
+    if (isSubmitting) return
+
+    setIsSubmitting(true)
+    try {
+      await loginWithGoogle()
+      router.push("/")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Đăng nhập thất bại"
+      toast.error(message)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -52,9 +64,10 @@ export default function LoginPage() {
             variant="outline"
             className="flex h-12 w-full items-center justify-center gap-3 text-sm font-medium"
             onClick={handleGoogleLogin}
+            disabled={isSubmitting}
           >
             <GoogleIcon className="h-5 w-5" />
-            {"Dang nhap bang Google"}
+            {isSubmitting ? "Dang xu ly..." : "Dang nhap bang Google"}
           </Button>
 
           <div className="mt-4 text-center text-xs text-muted-foreground">

@@ -13,8 +13,7 @@ services:
       - NEXTAUTH_SECRET=your-super-secret-key
       # Sửa thành domain name thực tế bạn đang truy cập
       - NEXTAUTH_URL=http://master-02:3003
-      # Ép IPv4-first để tránh IPv6 Happy Eyeballs timeout khi gọi Google OAuth (OAUTH_CALLBACK_ERROR)
-      - NODE_OPTIONS=--dns-result-order=ipv4first
+      - NEXT_PUBLIC_GOOGLE_CLIENT_ID=752734667309-khhufui27coorhmk8gh15epbpbeerg25.apps.googleusercontent.com
       - GOOGLE_CLIENT_ID=752734667309-khhufui27coorhmk8gh15epbpbeerg25.apps.googleusercontent.com
       - GOOGLE_CLIENT_SECRET=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
     volumes:

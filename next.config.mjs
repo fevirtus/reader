@@ -3,13 +3,6 @@ const readerApiOrigin = (process.env.READER_API_ORIGIN || "http://localhost:8000
 
 const nextConfig = {
   output: "standalone",
-  // Tắt HTTP keep-alive để tránh stale connection tới Google OAuth.
-  // Sau lần đăng nhập đầu, Node.js giữ TCP socket tới oauth2.googleapis.com trong pool.
-  // NAT/firewall của Docker drop socket sau vài phút (silently). Khi login lần 2,
-  // openid-client (bên trong NextAuth) reuse socket đã chết → request treo → OAUTH_CALLBACK_ERROR 3500ms.
-  httpAgentOptions: {
-    keepAlive: false,
-  },
   typescript: {
     ignoreBuildErrors: true,
   },

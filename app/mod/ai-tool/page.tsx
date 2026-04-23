@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 
+// Trang này được đặt dưới /mod layout đã kiểm soát quyền ở server side.
+
 type NovelRow = {
   id: string
   title: string

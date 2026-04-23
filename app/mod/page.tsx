@@ -1,13 +1,13 @@
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
 import Link from "next/link"
 import { Sparkles } from "lucide-react"
 import { cookies } from "next/headers"
+import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie"
+import { requireModSessionUser } from "@/lib/server-auth"
 
 const readerApiOrigin = (process.env.READER_API_ORIGIN || "http://localhost:8000").replace(/\/+$/, "")
 
 export default async function ModDashboardPage() {
-    const session = await getServerSession(authOptions)
+    const sessionUser = await requireModSessionUser()
 
     let novelCount = 0
     let totalViews = 0
@@ -15,10 +15,10 @@ export default async function ModDashboardPage() {
     let seriesCount = 0
 
     try {
-        const cookieHeader = (await cookies()).toString()
+        const accessToken = (await cookies()).get(AUTH_COOKIE_NAME)?.value || ""
         const res = await fetch(`${readerApiOrigin}/api/mod/overview`, {
             cache: "no-store",
-            headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+            headers: accessToken ? { authorization: `Bearer ${accessToken}` } : undefined,
         })
         if (res.ok) {
             const data = await res.json()
@@ -33,7 +33,7 @@ export default async function ModDashboardPage() {
 
     return (
         <div>
-            <h1 className="text-2xl font-bold mb-4">Xin chào, {session?.user.name}</h1>
+            <h1 className="text-2xl font-bold mb-4">Xin chào, {sessionUser?.name || "Moderator"}</h1>
             <p className="text-muted-foreground mb-6">
                 Chào mừng bạn đến với trang quản trị dành cho Moderator.
             </p>

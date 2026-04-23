@@ -1,6 +1,21 @@
-import NextAuth from "next-auth"
-import { authOptions } from "@/lib/auth"
+import { NextResponse } from "next/server"
 
-const handler = NextAuth(authOptions)
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
 
-export { handler as GET, handler as POST }
+function disabled() {
+	return NextResponse.json(
+		{
+			detail: "Legacy NextAuth route is disabled. Use /api/auth/login, /api/auth/session, /api/auth/logout.",
+		},
+		{ status: 410 },
+	)
+}
+
+export async function GET() {
+	return disabled()
+}
+
+export async function POST() {
+	return disabled()
+}

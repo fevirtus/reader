@@ -206,7 +206,7 @@ export function Header() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={logout} className="flex items-center gap-2 text-destructive">
+                <DropdownMenuItem onClick={() => void logout()} className="flex items-center gap-2 text-destructive">
                   <LogOut className="h-4 w-4" />
                   Đăng Xuất
                 </DropdownMenuItem>
@@ -304,7 +304,7 @@ export function Header() {
                         <p className="text-xs text-primary">Loại tài khoản: {roleLabel(user.role)}</p>
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm" className="w-full justify-start text-destructive" onClick={() => { logout(); setOpen(false) }}>
+                    <Button variant="ghost" size="sm" className="w-full justify-start text-destructive" onClick={() => { void logout(); setOpen(false) }}>
                       <LogOut className="mr-2 h-4 w-4" />
                       Đăng Xuất
                     </Button>
