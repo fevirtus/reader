@@ -4,11 +4,24 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import type { User } from "./types"
 
 let googleScriptPromise: Promise<void> | null = null
+let googleInitializedClientId = ""
+let pendingCredentialResolver: ((token: string) => void) | null = null
 
-function ensureGoogleIdentityScript() {
+function waitForDocumentReady() {
+  if (typeof window === "undefined") return Promise.resolve()
+  if (document.readyState !== "loading") return Promise.resolve()
+
+  return new Promise<void>((resolve) => {
+    document.addEventListener("DOMContentLoaded", () => resolve(), { once: true })
+  })
+}
+
+async function ensureGoogleIdentityScript() {
   if (typeof window === "undefined") return Promise.resolve()
   if ((window as any).google?.accounts?.id) return Promise.resolve()
   if (googleScriptPromise) return googleScriptPromise
+
+  await waitForDocumentReady()
 
   googleScriptPromise = new Promise((resolve, reject) => {
     const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]')
@@ -30,8 +43,41 @@ function ensureGoogleIdentityScript() {
   return googleScriptPromise
 }
 
-async function requestGoogleIdToken(clientId: string): Promise<string> {
+async function initializeGoogleIdentity(clientId: string) {
   await ensureGoogleIdentityScript()
+
+  const googleApi = (window as any).google?.accounts?.id
+  if (!googleApi) {
+    throw new Error("Google Identity API is unavailable")
+  }
+
+  // Avoid repeated initialize() calls that cause unstable GSI behavior.
+  if (googleInitializedClientId === clientId) {
+    return
+  }
+
+  googleApi.initialize({
+    client_id: clientId,
+    callback: (response: { credential?: string }) => {
+      const credential = (response?.credential || "").trim()
+      if (!credential || !pendingCredentialResolver) {
+        return
+      }
+
+      const resolver = pendingCredentialResolver
+      pendingCredentialResolver = null
+      resolver(credential)
+    },
+    auto_select: false,
+    cancel_on_tap_outside: true,
+    use_fedcm_for_prompt: true,
+  })
+
+  googleInitializedClientId = clientId
+}
+
+async function requestGoogleIdToken(clientId: string): Promise<string> {
+  await initializeGoogleIdentity(clientId)
 
   return new Promise((resolve, reject) => {
     const googleApi = (window as any).google?.accounts?.id
@@ -40,32 +86,26 @@ async function requestGoogleIdToken(clientId: string): Promise<string> {
       return
     }
 
-    let settled = false
-
-    googleApi.initialize({
-      client_id: clientId,
-      callback: (response: { credential?: string }) => {
-        if (settled) return
-        settled = true
-        const credential = (response?.credential || "").trim()
-        if (!credential) {
-          reject(new Error("Google did not return ID token"))
-          return
-        }
-        resolve(credential)
-      },
-      auto_select: false,
-      cancel_on_tap_outside: true,
-    })
-
-    googleApi.prompt((notification: any) => {
-      if (settled) return
-
-      if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
-        settled = true
-        reject(new Error("Google sign-in prompt was closed or not displayed"))
+    pendingCredentialResolver = resolve
+    const timeoutId = window.setTimeout(() => {
+      if (!pendingCredentialResolver) {
+        return
       }
-    })
+      pendingCredentialResolver = null
+      reject(new Error("Google sign-in timed out. Please try again."))
+    }, 15000)
+
+    const originalResolver = pendingCredentialResolver
+    pendingCredentialResolver = (token: string) => {
+      window.clearTimeout(timeoutId)
+      if (!originalResolver) {
+        reject(new Error("Google sign-in did not complete"))
+        return
+      }
+      resolve(token)
+    }
+
+    googleApi.prompt()
   })
 }
 
