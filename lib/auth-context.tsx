@@ -77,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const [sessionUser, setSessionUser] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [googleClientId, setGoogleClientId] = useState("")
 
   const fetchSession = useCallback(async () => {
     try {
@@ -100,6 +101,34 @@ export function useAuth() {
     fetchSession()
   }, [fetchSession])
 
+  useEffect(() => {
+    let active = true
+
+    const fetchAuthConfig = async () => {
+      try {
+        const res = await fetch("/api/auth/config", { cache: "no-store" })
+        if (!res.ok) {
+          return
+        }
+
+        const data = await res.json()
+        if (active) {
+          setGoogleClientId(String(data?.googleClientId || "").trim())
+        }
+      } catch {
+        if (active) {
+          setGoogleClientId("")
+        }
+      }
+    }
+
+    void fetchAuthConfig()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const user: User | null = useMemo(() => {
     if (!sessionUser) return null
     return {
@@ -114,9 +143,9 @@ export function useAuth() {
   }, [sessionUser])
 
   const loginWithGoogle = async () => {
-    const clientId = (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "").trim()
+    const clientId = googleClientId.trim()
     if (!clientId) {
-      throw new Error("NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured")
+      throw new Error("Google client id is not configured on server runtime")
     }
 
     const googleIdToken = await requestGoogleIdToken(clientId)
