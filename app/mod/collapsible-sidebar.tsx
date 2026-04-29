@@ -33,6 +33,7 @@ export function CollapsibleSidebar() {
         { href: "/mod/thieu-thong-tin", label: "Truyện thiếu dữ liệu", icon: AlertTriangle },
         { href: "/mod/the-loai", label: "Quản lý thể loại", icon: Tag },
         { href: "/mod/de-cu", label: "Quản lý đề cử", icon: Star },
+        { href: "/mod/import", label: "Import EPUB", icon: BookOpen },
         { href: "/mod/ai-tool", label: "AI Tool", icon: Sparkles },
     ]
 
