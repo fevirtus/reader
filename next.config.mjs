@@ -21,10 +21,6 @@ const nextConfig = {
           destination: `${readerApiOrigin}/api/novels/:path*`,
         },
         {
-          source: "/api/truyen/:path*",
-          destination: `${readerApiOrigin}/api/truyen/:path*`,
-        },
-        {
           source: "/api/chapters/:path*",
           destination: `${readerApiOrigin}/api/chapters/:path*`,
         },
