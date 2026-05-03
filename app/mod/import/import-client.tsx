@@ -1,218 +1,615 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Check, Loader2, Search, Sparkles, Trash2, UploadCloud, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Progress } from "@/components/ui/progress"
 import { toast } from "sonner"
 
-type Asset = { id: string; path: string; status: string }
-type Job = { id: string; sourceAssetId: string; path?: string; status: string; error?: string | null }
+type AssetItem = {
+  id: string
+  path: string
+  title?: string | null
+  author?: string | null
+  status: string
+  updatedAt: string
+}
+
+type SearchResponse = {
+  items: AssetItem[]
+  pagination: { page: number; limit: number; total: number; totalPages: number }
+}
+
+type ParsePreviewSample = {
+  bucket: string
+  number: number
+  title: string
+  chars: number
+  preview: string
+}
+
+type Genre = {
+  id: string
+  name: string
+}
 
 export function ImportClient() {
-  const [assets, setAssets] = useState<Asset[]>([])
-  const [jobs, setJobs] = useState<Job[]>([])
-  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
-  const [lastIndex, setLastIndex] = useState<number | null>(null)
-  const [assetQuery, setAssetQuery] = useState("")
-  const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [offset, setOffset] = useState(0)
-  const [limit] = useState(50)
+  const [step, setStep] = useState(1)
+  const [query, setQuery] = useState("")
+  const [searching, setSearching] = useState(false)
+  const [assets, setAssets] = useState<AssetItem[]>([])
+  const [asset, setAsset] = useState<AssetItem | null>(null)
+  const [coverDetected, setCoverDetected] = useState(false)
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState("")
+  const [uploadingCover, setUploadingCover] = useState(false)
 
-  const [selectedJobId, setSelectedJobId] = useState("")
-  const [mapNovelId, setMapNovelId] = useState("")
-  const [tab, setTab] = useState<"unconverted" | "converted">("unconverted")
+  const [title, setTitle] = useState("")
+  const [author, setAuthor] = useState("")
+  const [shortDescription, setShortDescription] = useState("")
+  const [genres, setGenres] = useState<Genre[]>([])
+  const [selectedGenreIds, setSelectedGenreIds] = useState<string[]>([])
+  const [genreQuery, setGenreQuery] = useState("")
+  const [addingGenre, setAddingGenre] = useState(false)
+  const [splitMode, setSplitMode] = useState<"toc" | "regex">("toc")
+  const [chapterStartPattern, setChapterStartPattern] = useState("^\\s*(?:[#>*\\-\\[]\\s*)*(?:ch(?:u\\.?|ương|uong)?|chapter|hồi|hoi|quyển|quyen|phần|phan|tập|tap)\\s*\\d+(?:[\\.:\\-\\)]\\s*|\\s+).+$")
+  const [replaceExisting, setReplaceExisting] = useState(false)
 
-  const visibleAssets = useMemo(
-    () => tab === "unconverted" ? assets.filter((a) => a.status !== "completed") : assets,
-    [assets, tab],
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewItems, setPreviewItems] = useState<ParsePreviewSample[]>([])
+  const [chapterCount, setChapterCount] = useState(0)
+  const [parseError, setParseError] = useState("")
+
+  const [aiLoading, setAiLoading] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [sessionId, setSessionId] = useState("")
+  const [phase, setPhase] = useState("prepare")
+  const [progress, setProgress] = useState(0)
+  const [result, setResult] = useState<Record<string, unknown> | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const normalizedGenreQuery = genreQuery.trim().toLowerCase()
+  const exactMatchedGenre = useMemo(
+    () => genres.find((genre) => genre.name.trim().toLowerCase() === normalizedGenreQuery) || null,
+    [genres, normalizedGenreQuery],
+  )
+  const matchedGenres = useMemo(() => {
+    if (!normalizedGenreQuery) return []
+    return genres.filter((genre) => genre.name.toLowerCase().includes(normalizedGenreQuery)).slice(0, 20)
+  }, [genres, normalizedGenreQuery])
+  const selectedGenreItems = useMemo(
+    () => genres.filter((genre) => selectedGenreIds.includes(genre.id)),
+    [genres, selectedGenreIds],
   )
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQuery(assetQuery.trim()), 250)
-    return () => clearTimeout(t)
-  }, [assetQuery])
-
-  const refresh = async () => {
-    setLoading(true)
-    try {
-      const aUrl = tab === "unconverted"
-        ? `/api/mod-import/assets?unconvertedOnly=true&limit=${limit}&offset=${offset}${debouncedQuery ? `&q=${encodeURIComponent(debouncedQuery)}` : ""}`
-        : `/api/mod-import/assets?status=completed&limit=${limit}&offset=${offset}${debouncedQuery ? `&q=${encodeURIComponent(debouncedQuery)}` : ""}`
-      const [aRes, jRes] = await Promise.all([fetch(aUrl), fetch("/api/mod-import/review-required")])
-      const aData = await aRes.json().catch(() => [])
-      const jData = await jRes.json().catch(() => [])
-      if (!aRes.ok) throw new Error("Không tải được danh sách EPUB")
-      if (!jRes.ok) throw new Error("Không tải được mismatch jobs")
-      setAssets(Array.isArray(aData) ? aData : [])
-      setJobs(Array.isArray(jData) ? jData : [])
-    } catch (e: any) {
-      toast.error(e?.message || "Lỗi tải dữ liệu")
-    } finally {
-      setLoading(false)
-    }
+  const fetchGenres = async (): Promise<Genre[]> => {
+    const res = await fetch("/api/mod/the-loai", { credentials: "include" })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.error || data?.detail || "Không lấy được thể loại")
+    const next = Array.isArray(data) ? (data as Genre[]) : []
+    setGenres(next)
+    return next
   }
 
-  useEffect(() => {
-    refresh()
-  }, [debouncedQuery, offset, tab])
+  const toggleGenre = (id: string) => {
+    setSelectedGenreIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
+  }
 
-  const selectItem = (assetId: string, index: number, shiftKey: boolean) => {
-    if (shiftKey && lastIndex !== null) {
-      const start = Math.min(lastIndex, index)
-      const end = Math.max(lastIndex, index)
-      const range = visibleAssets.slice(start, end + 1).map((x) => x.id)
-      setSelectedAssetIds((prev) => Array.from(new Set([...prev, ...range])))
+  const handleAddGenre = async () => {
+    const name = genreQuery.trim()
+    if (!name) return
+      const existed = genres.find((genre) => genre.name.trim().toLowerCase() === name.toLowerCase())
+      if (existed) {
+      setSelectedGenreIds((prev) => (prev.includes(existed.id) ? prev : [...prev, existed.id]))
+      setGenreQuery("")
       return
     }
-    setLastIndex(index)
-    setSelectedAssetIds((prev) => (prev.includes(assetId) ? prev.filter((x) => x !== assetId) : [...prev, assetId]))
-  }
-
-  const convertSelected = async () => {
-    if (selectedAssetIds.length === 0) return toast.error("Chưa chọn EPUB")
-    let success = 0
-    for (const assetId of selectedAssetIds) {
-      const approveRes = await fetch(`/api/mod-import/assets/${assetId}/approve`, {
+    setAddingGenre(true)
+    try {
+      const res = await fetch("/api/mod/the-loai", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "approved" }),
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name, description: "" }),
       })
-      if (!approveRes.ok) continue
-
-      const createRes = await fetch("/api/mod-import/jobs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sourceAssetId: assetId }),
-      })
-      const createData = await createRes.json().catch(() => ({}))
-      if (!createRes.ok) continue
-
-      const runRes = await fetch(`/api/mod-import/jobs/${createData.id}/run`, { method: "POST" })
-      if (runRes.ok) success += 1
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || data?.detail || "Không tạo được thể loại")
+      await fetchGenres()
+      if (data?.id) {
+        setSelectedGenreIds((prev) => (prev.includes(data.id) ? prev : [...prev, data.id]))
+      }
+      setGenreQuery("")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không tạo được thể loại")
+    } finally {
+      setAddingGenre(false)
     }
-    toast.success(`Đã convert ${success}/${selectedAssetIds.length} EPUB`)
-    setSelectedAssetIds([])
-    refresh()
   }
 
-  const autoReview = async () => {
-    const res = await fetch("/api/mod-import/assets/auto-review?limit=5000", { method: "POST" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) return toast.error((data as any)?.detail || "Auto-review thất bại")
-    toast.success(`Đã phân loại ${data.processed}: approved ${data.approved}, review ${data.reviewRequired}`)
-    refresh()
+  const handleDeleteGenre = async (id: string, name: string) => {
+    if (!confirm(`Bạn có chắc muốn xóa thể loại "${name}" khỏi hệ thống?`)) return
+    try {
+      const res = await fetch(`/api/mod/the-loai?id=${id}`, { method: "DELETE", credentials: "include" })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || data?.detail || "Không xóa được thể loại")
+      await fetchGenres()
+      setSelectedGenreIds((prev) => prev.filter((v) => v !== id))
+      if (genreQuery.trim().toLowerCase() === name.trim().toLowerCase()) {
+        setGenreQuery("")
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không xóa được thể loại")
+    }
   }
 
-  const mapMismatch = async () => {
-    if (!selectedJobId || !mapNovelId) return toast.error("Chọn mismatch job và nhập novelId")
-    const res = await fetch(`/api/mod-import/jobs/${selectedJobId}/apply-mapping`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ novelId: mapNovelId, overwrite: true }),
+  const ensureGenreIdsByNames = async (names: string[]): Promise<string[]> => {
+    const uniqueNames = [...new Set(names.map((n) => n.trim()).filter(Boolean))].slice(0, 6)
+    if (uniqueNames.length === 0) return []
+
+    let genreList = await fetchGenres()
+    const ids: string[] = []
+
+    for (const name of uniqueNames) {
+      const existing = genreList.find((g) => g.name.trim().toLowerCase() === name.toLowerCase())
+      if (existing) {
+        ids.push(existing.id)
+        continue
+      }
+
+      const res = await fetch("/api/mod/the-loai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name, description: "" }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data?.error || data?.detail || `Không thể tạo thể loại: ${name}`)
+      }
+      if (data?.id) {
+        ids.push(data.id)
+      }
+      genreList = await fetchGenres()
+    }
+
+    return [...new Set(ids)].slice(0, 6)
+  }
+
+  const onSearch = async () => {
+    if (query.trim().length < 2) {
+      toast.warning("Nhập ít nhất 2 ký tự để tìm")
+      return
+    }
+    setSearching(true)
+    try {
+      const res = await fetch(`/api/import/assets/search?q=${encodeURIComponent(query.trim())}&page=1&limit=20`, { credentials: "include" })
+      const data = (await res.json()) as SearchResponse
+      if (!res.ok) throw new Error((data as unknown as { detail?: string }).detail || "Search failed")
+      setAssets(data.items || [])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không tìm được asset")
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const onSelectAsset = async (item: AssetItem) => {
+    setAsset(item)
+    setStep(2)
+    setCoverPreviewUrl("")
+    try {
+      const res = await fetch(`/api/import/assets/${item.id}/preview-metadata`, { credentials: "include" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "Không lấy được metadata")
+      const suggested = data?.suggested || {}
+      setCoverDetected(Boolean(data?.asset?.coverDetected))
+      if (data?.asset?.coverDetected) {
+        const ts = Date.now()
+        setCoverPreviewUrl(`/api/import/assets/${item.id}/preview-cover?t=${ts}`)
+      }
+      setTitle(suggested.title || item.title || item.path.split("/").pop()?.replace(/\.epub$/i, "") || "")
+      setAuthor(suggested.author || item.author || "Unknown")
+      setShortDescription(suggested.shortDescription || "")
+      const genreList = await fetchGenres()
+      const suggestedGenres: string[] = suggested.genres || []
+      if (suggestedGenres.length > 0) {
+        const lowered = suggestedGenres.map((v) => v.trim().toLowerCase())
+        const ids = genreList.filter((g) => lowered.includes(g.name.trim().toLowerCase())).map((g) => g.id)
+        setSelectedGenreIds(ids.slice(0, 6))
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không lấy được metadata")
+    }
+  }
+
+  const onUploadReplacementCover = async (file: File) => {
+    if (!asset) return
+    setUploadingCover(true)
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`/api/import/assets/${asset.id}/upload-cover`, {
+        method: "POST",
+        credentials: "include",
+        body: form,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "Upload cover that bai")
+      setCoverDetected(true)
+      if (data?.coverUrl) {
+        setCoverPreviewUrl(data.coverUrl)
+      }
+      toast.success("Da upload cover thay the")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Upload cover that bai")
+    } finally {
+      setUploadingCover(false)
+    }
+  }
+
+  const onAiSuggest = async () => {
+    if (!asset) return
+    setAiLoading(true)
+    try {
+      const res = await fetch(`/api/import/assets/${asset.id}/ai-suggest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ splitMode, chapterStartPattern: splitMode === "regex" ? chapterStartPattern : null }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "AI suggest failed")
+      const suggestedGenres: string[] = (data?.suggestedGenres || []).slice(0, 6)
+      setGenreQuery("")
+      if (suggestedGenres.length > 0) {
+        const ensuredIds = await ensureGenreIdsByNames(suggestedGenres)
+        setSelectedGenreIds(ensuredIds)
+      }
+      setShortDescription(data?.shortDescription || "")
+      toast.success("Đã áp dụng gợi ý AI")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "AI suggest lỗi")
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const onSaveReview = async () => {
+    if (!asset) return
+    try {
+      const res = await fetch(`/api/import/assets/${asset.id}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          title,
+          author,
+          shortDescription,
+          genres: selectedGenreItems.map((g) => g.name),
+          targetMode: "new",
+          replaceExisting,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "Lưu review thất bại")
+      toast.success("Đã lưu review")
+      setPreviewItems([])
+      setChapterCount(0)
+      setStep(3)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Lưu review thất bại")
+    }
+  }
+
+  const onParsePreview = async () => {
+    if (!asset) return
+    setPreviewLoading(true)
+    setPreviewItems([])
+    setChapterCount(0)
+    setParseError("")
+    try {
+      const res = await fetch(`/api/import/assets/${asset.id}/parse-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ splitMode, chapterStartPattern: splitMode === "regex" ? chapterStartPattern : null }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "Parse preview thất bại")
+      setPreviewItems(data?.sample || [])
+      setChapterCount(data?.chapterCount || 0)
+      if ((data?.chapterCount || 0) <= 0) {
+        setParseError("Không tách được chương từ EPUB này với cấu hình hiện tại. Thử đổi TOC/Regex rồi parse lại.")
+      }
+      toast.success("Đã tạo preview chương")
+    } catch (error) {
+      setParseError(error instanceof Error ? error.message : "Preview thất bại")
+      toast.error(error instanceof Error ? error.message : "Preview thất bại")
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const pollSession = async (id: string) => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/import/sessions/${id}`, { credentials: "include" })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data?.detail || "Không lấy được tiến trình")
+        setPhase(data.phase || "prepare")
+        setProgress(Number(data.progressPct || 0))
+        if (data.status === "completed" || data.status === "failed") {
+          if (pollRef.current) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+          }
+          setImporting(false)
+          setResult(data.resultJson || null)
+          if (data.status === "completed") {
+            toast.success("Import hoàn tất")
+          } else {
+            toast.error(data.log || "Import thất bại")
+          }
+        }
+      } catch {
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = null
+        }
+        setImporting(false)
+      }
+    }, 1500)
+  }
+
+  const onStartImport = async () => {
+    if (!asset) return
+    setImporting(true)
+    try {
+      const res = await fetch(`/api/import/assets/${asset.id}/start-import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          replaceExisting,
+          splitMode,
+          chapterStartPattern: splitMode === "regex" ? chapterStartPattern : null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "Start import thất bại")
+      if (!data?.sessionId) throw new Error("Missing sessionId from start-import")
+      setSessionId(data.sessionId)
+      setStep(4)
+      pollSession(data.sessionId)
+    } catch (error) {
+      setImporting(false)
+      toast.error(error instanceof Error ? error.message : "Không bắt đầu import được")
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    setPreviewItems([])
+    setChapterCount(0)
+    setParseError("")
+  }, [splitMode, chapterStartPattern])
+
+  useEffect(() => {
+    if (step === 3 && asset) {
+      void onParsePreview()
+    }
+  }, [step, asset?.id])
+
+  useEffect(() => {
+    fetchGenres().catch(() => {
+      setGenres([])
     })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) return toast.error((data as any)?.detail || "Map thất bại")
-    toast.success(`Map xong: ${data.mapped || 0} chương, thiếu ${data.missing || 0}`)
-    refresh()
-  }
-
-  const markConverted = async (assetId: string) => {
-    if (!confirm("Đánh dấu EPUB này đã convert (ẩn khỏi danh sách chưa convert)?")) return
-    const res = await fetch(`/api/mod-import/assets/${assetId}/mark-converted`, { method: "POST" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) return toast.error((data as any)?.detail || "Mark converted thất bại")
-    toast.success("Đã đánh dấu converted")
-    setSelectedAssetIds((prev) => prev.filter((x) => x !== assetId))
-    refresh()
-  }
-
-  const unmarkConverted = async (assetId: string) => {
-    if (!confirm("Bỏ trạng thái converted để convert lại?")) return
-    const res = await fetch(`/api/mod-import/assets/${assetId}/unmark-converted`, { method: "POST" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) return toast.error((data as any)?.detail || "Unmark thất bại")
-    toast.success("Đã unmark converted")
-    refresh()
-  }
-
-  const deleteMismatchJob = async (jobId: string) => {
-    if (!confirm("Xoá mismatch job này và xoá luôn thư mục content trên NAS?")) return
-    const res = await fetch(`/api/mod-import/jobs/${jobId}?removeContent=true`, { method: "DELETE" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) return toast.error((data as any)?.detail || "Xoá job thất bại")
-    toast.success(`Đã xoá job ${jobId}`)
-    if (selectedJobId === jobId) setSelectedJobId("")
-    refresh()
-  }
+  }, [])
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border bg-card p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div>
-            <h3 className="font-semibold">EPUB nguồn (chưa convert)</h3>
-            <p className="text-xs text-muted-foreground mt-1">Click để chọn, Shift + click để chọn một khoảng, sau đó bấm Convert.</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={autoReview} className="rounded border px-3 py-2 text-sm">Auto Review</button>
-            <button onClick={refresh} className="rounded border px-3 py-2 text-sm">{loading ? "Đang tải..." : "Refresh"}</button>
-          </div>
-        </div>
-        <div className="mb-3 flex gap-2">
-          <button onClick={() => { setTab("unconverted"); setOffset(0) }} className={`rounded px-3 py-1 text-sm ${tab === "unconverted" ? "bg-primary text-primary-foreground" : "border"}`}>Chưa convert</button>
-          <button onClick={() => { setTab("converted"); setOffset(0) }} className={`rounded px-3 py-1 text-sm ${tab === "converted" ? "bg-primary text-primary-foreground" : "border"}`}>Đã convert</button>
-        </div>
-        <input className="border rounded px-3 py-2 text-sm w-full mb-3" placeholder="Tìm theo tên file/thư mục..." value={assetQuery} onChange={(e) => setAssetQuery(e.target.value)} />
-        <div className="space-y-2">
-          {visibleAssets.map((a, idx) => (
-            <div key={a.id} className={`rounded-xl border p-3 transition ${selectedAssetIds.includes(a.id) ? "border-primary bg-primary/5" : "hover:bg-muted/40"}`}>
-              <button
-                onClick={(e) => selectItem(a.id, idx, e.shiftKey)}
-                className="w-full text-left"
-              >
-                <div className="text-sm font-medium">{a.path}</div>
-                <div className="text-xs text-muted-foreground mt-1">status: {a.status}</div>
-              </button>
-              <div className="mt-2 flex justify-end gap-2">
-                {tab === "unconverted" ? <button onClick={() => markConverted(a.id)} className="rounded border px-2 py-1 text-xs">Mark Converted</button> : null}
-                {tab === "converted" ? <button onClick={() => unmarkConverted(a.id)} className="rounded border px-2 py-1 text-xs">Unmark</button> : null}
-              </div>
-            </div>
-          ))}
-          {visibleAssets.length === 0 && <div className="text-sm text-muted-foreground">Không có EPUB phù hợp</div>}
-        </div>
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="text-xs text-muted-foreground">Đã chọn {selectedAssetIds.length} file</div>
-          <div className="flex items-center gap-2">
-            <button className="rounded border px-2 py-1 text-xs disabled:opacity-50" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
-            <button className="rounded border px-2 py-1 text-xs" onClick={() => setOffset(offset + limit)}>Next</button>
-            <button disabled={selectedAssetIds.length === 0} onClick={convertSelected} className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">Convert</button>
-          </div>
-        </div>
+    <div className="space-y-6 p-4 md:p-6">
+      <div>
+        <h1 className="text-2xl font-bold">Import EPUB Wizard</h1>
+        <p className="text-sm text-muted-foreground">4 bước: Search -&gt; Metadata -&gt; Chapter Preview -&gt; Import</p>
       </div>
 
-      <div className="rounded-2xl border bg-card p-5 shadow-sm">
-        <h3 className="font-semibold">Mismatch / Review Jobs</h3>
-        <p className="text-xs text-muted-foreground mt-1">Danh sách job bị mismatch (sum/path/mapping). Chọn job rồi nhập novelId để map lại, không convert lại EPUB.</p>
-        <div className="space-y-2 mt-3">
-          {jobs.map((j) => (
-            <div key={j.id} className={`w-full rounded-xl border p-3 ${selectedJobId === j.id ? "border-primary bg-primary/5" : "hover:bg-muted/40"}`}>
-              <button onClick={() => setSelectedJobId(j.id)} className="w-full text-left">
-                <div className="text-xs text-muted-foreground">{j.id}</div>
-                <div className="text-sm font-medium">{j.path || j.sourceAssetId}</div>
-                <div className="text-xs text-amber-700 mt-1">{j.error || "review_required"}</div>
-              </button>
-              <div className="mt-2">
-                <button onClick={() => deleteMismatchJob(j.id)} className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50">Xoá job + content</button>
-              </div>
-            </div>
-          ))}
-          {jobs.length === 0 && <div className="text-sm text-muted-foreground">Không có mismatch job</div>}
-        </div>
-        <div className="mt-3 flex gap-2">
-          <input value={mapNovelId} onChange={(e) => setMapNovelId(e.target.value)} className="border rounded px-3 py-2 text-sm flex-1" placeholder="Novel ID cần map lại" />
-          <button disabled={!selectedJobId || !mapNovelId} onClick={mapMismatch} className="rounded border px-3 py-2 text-sm disabled:opacity-50">Map lại</button>
-        </div>
+      <div className="grid gap-2 md:grid-cols-4">
+        {[1, 2, 3, 4].map((n) => (
+          <div key={n} className={`rounded-lg border p-3 text-sm ${step >= n ? "border-primary bg-primary/5" : "border-border"}`}>
+            Bước {n}
+          </div>
+        ))}
       </div>
+
+      {step === 1 && (
+        <section className="space-y-3 rounded-xl border p-4">
+          <div className="flex gap-2">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  if (!searching) {
+                    onSearch()
+                  }
+                }
+              }}
+              placeholder="Tìm theo tên EPUB..."
+            />
+            <Button onClick={onSearch} disabled={searching}>{searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Tìm</Button>
+          </div>
+          <div className="space-y-2">
+            {assets.map((item) => (
+              <button key={item.id} type="button" onClick={() => onSelectAsset(item)} className="w-full rounded-lg border p-3 text-left hover:border-primary/60">
+                <p className="font-medium">{item.title || item.path.split("/").pop()}</p>
+                <p className="text-xs text-muted-foreground">{item.path}</p>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {step === 2 && asset && (
+        <section className="space-y-3 rounded-xl border p-4">
+          <h2 className="font-semibold">Review metadata</h2>
+          <p className={`text-xs ${coverDetected ? "text-emerald-600" : "text-muted-foreground"}`}>
+            {coverDetected
+              ? "Da nhan dien duoc cover trong EPUB. He thong se upload len R2 khi bat dau import."
+              : "Chua nhan dien duoc cover trong EPUB (neu co)."}
+          </p>
+          <div className="flex flex-wrap items-start gap-4 rounded-md border bg-muted/20 p-3">
+            <div className="h-44 w-32 overflow-hidden rounded border bg-background">
+              {coverPreviewUrl ? (
+                <img src={coverPreviewUrl} alt="Cover preview" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Khong co preview</div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Cover thay the (neu can)</label>
+              <Input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) {
+                    void onUploadReplacementCover(file)
+                  }
+                }}
+                disabled={uploadingCover}
+              />
+              <p className="text-xs text-muted-foreground">Upload anh thay the de uu tien dung cover nay khi import.</p>
+            </div>
+          </div>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Tiêu đề" />
+          <Input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Tác giả" />
+          <Textarea value={shortDescription} onChange={(e) => setShortDescription(e.target.value)} placeholder="Mô tả ngắn" rows={4} />
+          <div className="space-y-2 rounded-md border bg-card p-3">
+            <div className="flex gap-2">
+              <Input
+                value={genreQuery}
+                onChange={(e) => setGenreQuery(e.target.value)}
+                placeholder="Nhập để tìm hoặc tạo thể loại..."
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    void handleAddGenre()
+                  }
+                }}
+              />
+              <Button type="button" variant="secondary" onClick={handleAddGenre} disabled={addingGenre || !genreQuery.trim()}>
+                {addingGenre ? <Loader2 className="h-4 w-4 animate-spin" /> : (exactMatchedGenre ? (selectedGenreIds.includes(exactMatchedGenre.id) ? "Đã chọn" : "Chọn") : "Tạo")}
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {selectedGenreItems.map((genre) => (
+                <div key={genre.id} className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/15 px-3 py-1 text-xs text-primary">
+                  <span className="font-medium">{genre.name}</span>
+                  <button type="button" className="inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-muted" onClick={() => toggleGenre(genre.id)}>
+                    <X className="h-3 w-3" />
+                  </button>
+                  <button type="button" className="inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground" onClick={() => handleDeleteGenre(genre.id, genre.name)}>
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              {selectedGenreItems.length === 0 && <span className="text-xs text-muted-foreground">Chưa chọn thể loại</span>}
+            </div>
+            {genreQuery.trim().length > 0 && (
+              <div className="border-t pt-2">
+                <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Kết quả phù hợp</p>
+                <div className="flex flex-wrap gap-2">
+                  {matchedGenres.map((genre) => {
+                    const isSelected = selectedGenreIds.includes(genre.id)
+                    return (
+                      <div key={genre.id} className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${isSelected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-muted/50 text-muted-foreground"}`}>
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleGenre(genre.id)}>
+                          {genre.name}
+                          {isSelected && <Check className="h-3 w-3" />}
+                        </button>
+                        <button type="button" className="inline-flex h-4 w-4 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground" onClick={() => handleDeleteGenre(genre.id, genre.name)}>
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
+            Replace chapter đã tồn tại
+          </label>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onAiSuggest} disabled={aiLoading}>{aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} AI gợi ý</Button>
+            <Button onClick={onSaveReview}>Lưu & sang bước 3</Button>
+          </div>
+        </section>
+      )}
+
+      {step === 3 && asset && (
+        <section className="space-y-3 rounded-xl border p-4">
+          <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 p-3">
+            <label className="text-sm font-medium">Tách chương:</label>
+            <select className="rounded border px-2 py-1 text-sm" value={splitMode} onChange={(e) => setSplitMode(e.target.value as "toc" | "regex")}>
+              <option value="toc">TOC (lọc intro/mục lục)</option>
+              <option value="regex">Regex tiếng Việt</option>
+            </select>
+            {splitMode === "regex" && (
+              <Input value={chapterStartPattern} onChange={(e) => setChapterStartPattern(e.target.value)} placeholder="Regex bắt đầu chương" />
+            )}
+          </div>
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">Preview chapters</h2>
+            <Button onClick={onParsePreview} disabled={previewLoading}>{previewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Parse preview</Button>
+          </div>
+          <p className="text-sm text-muted-foreground">Số chương phát hiện: {chapterCount}</p>
+          {parseError && (
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{parseError}</p>
+          )}
+          <div className="max-h-[420px] space-y-2 overflow-auto rounded-lg border p-3">
+            {previewItems.map((item) => (
+              <div key={`${item.bucket}-${item.number}`} className="rounded border p-2">
+                <p className="text-xs text-muted-foreground">{item.bucket.toUpperCase()} • Chương {item.number} • {item.chars} chars</p>
+                <p className="font-medium">{item.title || `Chương ${item.number}`}</p>
+                <p className="text-sm text-muted-foreground">{item.preview}</p>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setStep(2)}>Quay lại bước 2</Button>
+            <Button onClick={onStartImport} disabled={importing || previewItems.length === 0}>{importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />} Bắt đầu import</Button>
+          </div>
+        </section>
+      )}
+
+      {step === 4 && (
+        <section className="space-y-3 rounded-xl border p-4">
+          <h2 className="font-semibold">Import progress</h2>
+          <p className="text-sm text-muted-foreground">Session: {sessionId}</p>
+          <p className="text-sm text-muted-foreground">Phase: {phase}</p>
+          <Progress value={progress} />
+          <p className="text-sm">{Math.round(progress)}%</p>
+          {result && (
+            <pre className="overflow-auto rounded bg-muted p-3 text-xs">{JSON.stringify(result, null, 2)}</pre>
+          )}
+        </section>
+      )}
     </div>
   )
 }

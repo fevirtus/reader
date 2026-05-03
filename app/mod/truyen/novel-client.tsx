@@ -13,7 +13,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
-import { BookOpen, Loader2, Plus, Upload, Edit, Trash2, LayoutGrid, List, Image as ImageIcon, Search, FileText, X, Check, FolderOpen, ChevronLeft, ChevronRight, WandSparkles } from "lucide-react"
+import { BookOpen, Loader2, Plus, Upload, Edit, Trash2, LayoutGrid, List, Image as ImageIcon, Search, FileText, X, Check, FolderOpen, ChevronLeft, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
 import { getNovelStatusBadgeClass } from "@/lib/novel-status"
@@ -1352,13 +1352,6 @@ export function NovelClient() {
                         <FolderOpen className="h-4 w-4" />
                         Chọn thư mục EPUB
                     </Button>
-                    <Button variant="outline" className="gap-2" asChild>
-                        <Link href="/mod/ai-tool">
-                            <WandSparkles className="h-4 w-4" />
-                            AI Tool
-                        </Link>
-                    </Button>
-
                     <Dialog
                         open={openEpubPreview}
                         onOpenChange={(open) => {

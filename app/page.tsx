@@ -75,16 +75,8 @@ type LatestChapterInfo = {
   chapterCreatedAt: string | null
 }
 
-type HomeApiResponse = {
-  hotSlides: HotCarouselItem[]
-  randomNovels: HomeNovel[]
-  recommendedByCountItems: RecommendedByCountItem[]
-  editorRecommendedItems: EditorRecommendedItem[]
-  weeklyRanking: RankingEntry[]
-  monthlyRanking: RankingEntry[]
-  allTimeRanking: RankingEntry[]
-  latestNovels: Array<HomeNovel & { latestChapter?: { number?: number | null; title?: string | null; createdAt?: string | null } | null }>
-  recentComments: RecentCommentItem[]
+type BrowseResponse = {
+  items: HomeNovel[]
 }
 
 function formatRelativeTime(value: string | Date | null | undefined): string {
@@ -171,22 +163,40 @@ export default async function HomePage() {
   const latestChapterMap = new Map<string, LatestChapterInfo>()
 
   try {
-    const homeData = await readerApiFetch<HomeApiResponse>("/api/home")
-    hotSlides = homeData.hotSlides
-    randomNovels = homeData.randomNovels
-    recommendedByCountItems = homeData.recommendedByCountItems
-    editorRecommendedItems = homeData.editorRecommendedItems
-    latestNovels = homeData.latestNovels
-    recentComments = homeData.recentComments
-    weeklyRanking = homeData.weeklyRanking
-    monthlyRanking = homeData.monthlyRanking
-    allTimeRanking = homeData.allTimeRanking
+    const [popular, latest] = await Promise.all([
+      readerApiFetch<BrowseResponse>("/api/novels/browse?sort=popular&page=1&limit=24"),
+      readerApiFetch<BrowseResponse>("/api/novels/browse?sort=latest&page=1&limit=12"),
+    ])
+
+    const popularItems = popular.items || []
+    const latestItems = latest.items || []
+
+    hotSlides = popularItems.slice(0, 10).map((novel) => ({
+      id: novel.id,
+      slug: novel.slug,
+      title: novel.title,
+      authorName: novel.authorName,
+      description: novel.description,
+      coverUrl: novel.coverUrl,
+      totalChapters: novel.totalChapters,
+      rating: novel.rating,
+      views: novel.views,
+      status: novel.status,
+      hotSource: "all",
+    }))
+
+    randomNovels = [...popularItems].sort(() => Math.random() - 0.5).slice(0, 12)
+    latestNovels = latestItems
+    recentComments = []
+    weeklyRanking = popularItems.slice(0, 5).map((novel) => ({ id: novel.id, seriesId: novel.seriesId, novel, aggregatedViews: novel.views }))
+    monthlyRanking = popularItems.slice(5, 10).map((novel) => ({ id: novel.id, seriesId: novel.seriesId, novel, aggregatedViews: novel.views }))
+    allTimeRanking = popularItems.slice(10, 15).map((novel) => ({ id: novel.id, seriesId: novel.seriesId, novel, aggregatedViews: novel.views }))
 
     for (const novel of latestNovels) {
       latestChapterMap.set(novel.id, {
-        chapterNumber: novel.latestChapter?.number ?? null,
-        chapterTitle: novel.latestChapter?.title ?? null,
-        chapterCreatedAt: novel.latestChapter?.createdAt ?? null,
+        chapterNumber: null,
+        chapterTitle: null,
+        chapterCreatedAt: null,
       })
     }
   } catch (error) {

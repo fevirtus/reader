@@ -38,3 +38,13 @@ Luon xem `reader-api` la canonical behavior.
 - Rating: `POST /api/truyen/{id}/rate`.
 - Recommendation: `/api/user/recommendations`.
 - Error rules: follow `CONTRACT.md`.
+
+## Flow 5: MOD EPUB Import Wizard
+
+- Route: `/mod/import`
+- Steps:
+  1. Search source asset by name (`GET /api/import/assets/search`)
+  2. Review metadata + AI suggestion (`preview-metadata`, `ai-suggest`, `review`)
+  3. Parse preview with TOC/regex-start (`POST /api/import/assets/{id}/parse-preview`)
+  4. Start import and poll progress (`start-import`, `GET /api/import/sessions/{sessionId}`)
+- Rule: reviewer confirms metadata before import starts.
