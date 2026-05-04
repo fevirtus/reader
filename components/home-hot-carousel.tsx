@@ -32,8 +32,8 @@ function sourceClass(source: HotCarouselItem["hotSource"]) {
     return "border-primary/30 bg-primary/20 text-primary"
 }
 
-function compactLine(text: string, max = 180) {
-    const normalized = text.replace(/\s+/g, " ").trim()
+function compactLine(text: string | null | undefined, max = 180) {
+    const normalized = String(text || "").replace(/\s+/g, " ").trim()
     if (normalized.length <= max) return normalized
     return `${normalized.slice(0, max).trim()}...`
 }

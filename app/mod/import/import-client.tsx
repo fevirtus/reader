@@ -56,6 +56,7 @@ export function ImportClient() {
   const [parseError, setParseError] = useState("")
 
   const [aiLoading, setAiLoading] = useState(false)
+  const [aiModel, setAiModel] = useState("")
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
 
@@ -237,16 +238,19 @@ export function ImportClient() {
       form.append("preview", "true")
       form.append("splitMode", splitMode)
       if (splitMode === "regex") form.append("chapterRegex", chapterStartPattern)
-      const res = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: form })
+      form.append("title", title)
+      form.append("authorName", author)
+      const res = await fetch("/api/mod/epub/ai-suggest", { method: "POST", credentials: "include", body: form })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || "AI suggest failed")
-      const suggestedGenres: string[] = (data?.novel?.detectedGenres || []).slice(0, 6)
+      const suggestedGenres: string[] = (data?.suggestedGenres || []).slice(0, 6)
+      setAiModel(String(data?.model || data?.source || ""))
       setGenreQuery("")
       if (suggestedGenres.length > 0) {
         const ensuredIds = await ensureGenreIdsByNames(suggestedGenres)
         setSelectedGenreIds(ensuredIds)
       }
-      if (!shortDescription) setShortDescription(data?.novel?.description || "")
+      setShortDescription(data?.shortDescription || "")
       toast.success("Đã áp dụng gợi ý AI")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "AI suggest lỗi")
@@ -480,6 +484,7 @@ export function ImportClient() {
             <Button variant="outline" onClick={onAiSuggest} disabled={aiLoading}>{aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} AI gợi ý</Button>
             <Button onClick={onSaveReview}>Lưu & sang bước 3</Button>
           </div>
+          {aiModel && <p className="text-xs text-muted-foreground">AI model: {aiModel}</p>}
         </section>
       )}
 
