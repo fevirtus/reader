@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { Check, Loader2, Search, Sparkles, Trash2, UploadCloud, X } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Check, Loader2, Sparkles, Trash2, UploadCloud, X, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,16 +10,11 @@ import { toast } from "sonner"
 
 type AssetItem = {
   id: string
-  path: string
+  path?: string
   title?: string | null
   author?: string | null
   status: string
   updatedAt: string
-}
-
-type SearchResponse = {
-  items: AssetItem[]
-  pagination: { page: number; limit: number; total: number; totalPages: number }
 }
 
 type ParsePreviewSample = {
@@ -37,10 +32,9 @@ type Genre = {
 
 export function ImportClient() {
   const [step, setStep] = useState(1)
-  const [query, setQuery] = useState("")
-  const [searching, setSearching] = useState(false)
-  const [assets, setAssets] = useState<AssetItem[]>([])
+  const [uploadingEpub, setUploadingEpub] = useState(false)
   const [asset, setAsset] = useState<AssetItem | null>(null)
+  const [epubFile, setEpubFile] = useState<File | null>(null)
   const [coverDetected, setCoverDetected] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState("")
   const [uploadingCover, setUploadingCover] = useState(false)
@@ -63,11 +57,7 @@ export function ImportClient() {
 
   const [aiLoading, setAiLoading] = useState(false)
   const [importing, setImporting] = useState(false)
-  const [sessionId, setSessionId] = useState("")
-  const [phase, setPhase] = useState("prepare")
-  const [progress, setProgress] = useState(0)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const normalizedGenreQuery = genreQuery.trim().toLowerCase()
   const exactMatchedGenre = useMemo(
@@ -176,39 +166,40 @@ export function ImportClient() {
     return [...new Set(ids)].slice(0, 6)
   }
 
-  const onSearch = async () => {
-    if (query.trim().length < 2) {
-      toast.warning("Nhập ít nhất 2 ký tự để tìm")
-      return
-    }
-    setSearching(true)
+  const onUploadEpub = async (file: File) => {
+    setUploadingEpub(true)
     try {
-      const res = await fetch(`/api/import/assets/search?q=${encodeURIComponent(query.trim())}&page=1&limit=20`, { credentials: "include" })
-      const data = (await res.json()) as SearchResponse
-      if (!res.ok) throw new Error((data as unknown as { detail?: string }).detail || "Search failed")
-      setAssets(data.items || [])
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch("/api/import/uploads/preview", { method: "POST", credentials: "include", body: form })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || "Không tải được EPUB")
+      setEpubFile(file)
+      const item: AssetItem = {
+        id: `preview-${Date.now()}`,
+        title: data.suggested?.title || file.name,
+        author: data.suggested?.author || "Unknown",
+        status: "discovered",
+        updatedAt: new Date().toISOString(),
+      }
+      await onSelectAsset(item, data)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Không tìm được asset")
+      toast.error(error instanceof Error ? error.message : "Không tải được EPUB")
     } finally {
-      setSearching(false)
+      setUploadingEpub(false)
     }
   }
 
-  const onSelectAsset = async (item: AssetItem) => {
+  const onSelectAsset = async (item: AssetItem, previewData?: any) => {
     setAsset(item)
     setStep(2)
     setCoverPreviewUrl("")
     try {
-      const res = await fetch(`/api/import/assets/${item.id}/preview-metadata`, { credentials: "include" })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || "Không lấy được metadata")
+      const data = previewData || {}
       const suggested = data?.suggested || {}
-      setCoverDetected(Boolean(data?.asset?.coverDetected))
-      if (data?.asset?.coverDetected) {
-        const ts = Date.now()
-        setCoverPreviewUrl(`/api/import/assets/${item.id}/preview-cover?t=${ts}`)
-      }
-      setTitle(suggested.title || item.title || item.path.split("/").pop()?.replace(/\.epub$/i, "") || "")
+      setCoverDetected(Boolean(data?.coverDetected))
+      setCoverPreviewUrl(typeof data?.coverPreviewDataUrl === "string" ? data.coverPreviewDataUrl : "")
+      setTitle(suggested.title || item.title || "")
       setAuthor(suggested.author || item.author || "Unknown")
       setShortDescription(suggested.shortDescription || "")
       const genreList = await fetchGenres()
@@ -227,19 +218,8 @@ export function ImportClient() {
     if (!asset) return
     setUploadingCover(true)
     try {
-      const form = new FormData()
-      form.append("file", file)
-      const res = await fetch(`/api/import/assets/${asset.id}/upload-cover`, {
-        method: "POST",
-        credentials: "include",
-        body: form,
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || "Upload cover that bai")
       setCoverDetected(true)
-      if (data?.coverUrl) {
-        setCoverPreviewUrl(data.coverUrl)
-      }
+      setCoverPreviewUrl(URL.createObjectURL(file))
       toast.success("Da upload cover thay the")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload cover that bai")
@@ -249,24 +229,24 @@ export function ImportClient() {
   }
 
   const onAiSuggest = async () => {
-    if (!asset) return
+    if (!asset || !epubFile) return
     setAiLoading(true)
     try {
-      const res = await fetch(`/api/import/assets/${asset.id}/ai-suggest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ splitMode, chapterStartPattern: splitMode === "regex" ? chapterStartPattern : null }),
-      })
+      const form = new FormData()
+      form.append("file", epubFile)
+      form.append("preview", "true")
+      form.append("splitMode", splitMode)
+      if (splitMode === "regex") form.append("chapterRegex", chapterStartPattern)
+      const res = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: form })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || "AI suggest failed")
-      const suggestedGenres: string[] = (data?.suggestedGenres || []).slice(0, 6)
+      const suggestedGenres: string[] = (data?.novel?.detectedGenres || []).slice(0, 6)
       setGenreQuery("")
       if (suggestedGenres.length > 0) {
         const ensuredIds = await ensureGenreIdsByNames(suggestedGenres)
         setSelectedGenreIds(ensuredIds)
       }
-      setShortDescription(data?.shortDescription || "")
+      if (!shortDescription) setShortDescription(data?.novel?.description || "")
       toast.success("Đã áp dụng gợi ý AI")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "AI suggest lỗi")
@@ -278,21 +258,6 @@ export function ImportClient() {
   const onSaveReview = async () => {
     if (!asset) return
     try {
-      const res = await fetch(`/api/import/assets/${asset.id}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          title,
-          author,
-          shortDescription,
-          genres: selectedGenreItems.map((g) => g.name),
-          targetMode: "new",
-          replaceExisting,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || "Lưu review thất bại")
       toast.success("Đã lưu review")
       setPreviewItems([])
       setChapterCount(0)
@@ -303,23 +268,24 @@ export function ImportClient() {
   }
 
   const onParsePreview = async () => {
-    if (!asset) return
+    if (!asset || !epubFile) return
     setPreviewLoading(true)
     setPreviewItems([])
     setChapterCount(0)
     setParseError("")
     try {
-      const res = await fetch(`/api/import/assets/${asset.id}/parse-preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ splitMode, chapterStartPattern: splitMode === "regex" ? chapterStartPattern : null }),
-      })
+      const form = new FormData()
+      form.append("file", epubFile)
+      form.append("preview", "true")
+      form.append("splitMode", splitMode)
+      if (splitMode === "regex") form.append("chapterRegex", chapterStartPattern)
+      const res = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: form })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || "Parse preview thất bại")
-      setPreviewItems(data?.sample || [])
-      setChapterCount(data?.chapterCount || 0)
-      if ((data?.chapterCount || 0) <= 0) {
+      const chapters = Array.isArray(data?.chaptersPreview) ? data.chaptersPreview : []
+      setPreviewItems(chapters.map((c: any) => ({ bucket: "preview", number: c.number || 0, title: c.title || "", chars: (c.excerpt || "").length, preview: c.excerpt || "" })))
+      setChapterCount(Number(data?.novel?.totalChapters || chapters.length || 0))
+      if ((Number(data?.novel?.totalChapters || chapters.length || 0)) <= 0) {
         setParseError("Không tách được chương từ EPUB này với cấu hình hiện tại. Thử đổi TOC/Regex rồi parse lại.")
       }
       toast.success("Đã tạo preview chương")
@@ -331,75 +297,31 @@ export function ImportClient() {
     }
   }
 
-  const pollSession = async (id: string) => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/import/sessions/${id}`, { credentials: "include" })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data?.detail || "Không lấy được tiến trình")
-        setPhase(data.phase || "prepare")
-        setProgress(Number(data.progressPct || 0))
-        if (data.status === "completed" || data.status === "failed") {
-          if (pollRef.current) {
-            clearInterval(pollRef.current)
-            pollRef.current = null
-          }
-          setImporting(false)
-          setResult(data.resultJson || null)
-          if (data.status === "completed") {
-            toast.success("Import hoàn tất")
-          } else {
-            toast.error(data.log || "Import thất bại")
-          }
-        }
-      } catch {
-        if (pollRef.current) {
-          clearInterval(pollRef.current)
-          pollRef.current = null
-        }
-        setImporting(false)
-      }
-    }, 1500)
-  }
-
   const onStartImport = async () => {
-    if (!asset) return
+    if (!asset || !epubFile) return
     setImporting(true)
     try {
-      const res = await fetch(`/api/import/assets/${asset.id}/start-import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          replaceExisting,
-          splitMode,
-          chapterStartPattern: splitMode === "regex" ? chapterStartPattern : null,
-        }),
-      })
+      const form = new FormData()
+      form.append("file", epubFile)
+      form.append("preview", "false")
+      form.append("splitMode", splitMode)
+      if (splitMode === "regex") form.append("chapterRegex", chapterStartPattern)
+      form.append("title", title)
+      form.append("authorName", author)
+      form.append("description", shortDescription)
+      form.append("replaceExisting", String(replaceExisting))
+      const res = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: form })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || "Start import thất bại")
-      if (!data?.sessionId) throw new Error("Missing sessionId from start-import")
-      setSessionId(data.sessionId)
+      setResult(data || null)
       setStep(4)
-      pollSession(data.sessionId)
+      setImporting(false)
+      toast.success("Import hoàn tất")
     } catch (error) {
       setImporting(false)
       toast.error(error instanceof Error ? error.message : "Không bắt đầu import được")
     }
   }
-
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-    }
-  }, [])
 
   useEffect(() => {
     setPreviewItems([])
@@ -423,7 +345,7 @@ export function ImportClient() {
     <div className="space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-bold">Import EPUB Wizard</h1>
-        <p className="text-sm text-muted-foreground">4 bước: Search -&gt; Metadata -&gt; Chapter Preview -&gt; Import</p>
+        <p className="text-sm text-muted-foreground">4 bước: Upload -&gt; Metadata -&gt; Chapter Preview -&gt; Import</p>
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">
@@ -436,30 +358,20 @@ export function ImportClient() {
 
       {step === 1 && (
         <section className="space-y-3 rounded-xl border p-4">
-          <div className="flex gap-2">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  if (!searching) {
-                    onSearch()
-                  }
-                }
-              }}
-              placeholder="Tìm theo tên EPUB..."
-            />
-            <Button onClick={onSearch} disabled={searching}>{searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Tìm</Button>
-          </div>
-          <div className="space-y-2">
-            {assets.map((item) => (
-              <button key={item.id} type="button" onClick={() => onSelectAsset(item)} className="w-full rounded-lg border p-3 text-left hover:border-primary/60">
-                <p className="font-medium">{item.title || item.path.split("/").pop()}</p>
-                <p className="text-xs text-muted-foreground">{item.path}</p>
-              </button>
-            ))}
-          </div>
+          <p className="text-sm text-muted-foreground">Chọn file EPUB từ máy của bạn để bắt đầu.</p>
+          <Input
+            type="file"
+            accept=".epub,application/epub+zip"
+            disabled={uploadingEpub}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                void onUploadEpub(file)
+              }
+              e.currentTarget.value = ""
+            }}
+          />
+          {uploadingEpub && <p className="text-xs text-muted-foreground">Đang tải và phân tích EPUB...</p>}
         </section>
       )}
 
@@ -474,7 +386,16 @@ export function ImportClient() {
           <div className="flex flex-wrap items-start gap-4 rounded-md border bg-muted/20 p-3">
             <div className="h-44 w-32 overflow-hidden rounded border bg-background">
               {coverPreviewUrl ? (
-                <img src={coverPreviewUrl} alt="Cover preview" className="h-full w-full object-cover" />
+                <img
+                  src={coverPreviewUrl}
+                  alt="Cover preview"
+                  className="h-full w-full object-cover"
+                  onError={() => {
+                    setCoverPreviewUrl("")
+                    setCoverDetected(false)
+                    toast.error("Khong tai duoc cover preview tu server")
+                  }}
+                />
               ) : (
                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Khong co preview</div>
               )}
@@ -600,11 +521,7 @@ export function ImportClient() {
 
       {step === 4 && (
         <section className="space-y-3 rounded-xl border p-4">
-          <h2 className="font-semibold">Import progress</h2>
-          <p className="text-sm text-muted-foreground">Session: {sessionId}</p>
-          <p className="text-sm text-muted-foreground">Phase: {phase}</p>
-          <Progress value={progress} />
-          <p className="text-sm">{Math.round(progress)}%</p>
+          <h2 className="font-semibold">Import result</h2>
           {result && (
             <pre className="overflow-auto rounded bg-muted p-3 text-xs">{JSON.stringify(result, null, 2)}</pre>
           )}

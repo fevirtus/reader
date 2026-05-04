@@ -54,6 +54,7 @@ interface EpubPreviewData {
     splitMode: "toc" | "regex"
     detectedStructureType: "standard" | "light_novel"
     hasCoverFromEpub?: boolean
+    coverPreviewDataUrl?: string | null
     parserInfo?: {
         splitMode: "toc" | "regex"
         chapterRegexUsed?: string | null
@@ -1385,6 +1386,15 @@ export function NovelClient() {
                                             <span className="font-semibold">Cover từ EPUB:</span>{" "}
                                             {epubPreviewData.hasCoverFromEpub ? "Có (sẽ tự gán làm ảnh bìa)" : "Không tìm thấy cover"}
                                         </p>
+                                        {epubPreviewData.coverPreviewDataUrl && (
+                                            <div className="mt-2">
+                                                <img
+                                                    src={epubPreviewData.coverPreviewDataUrl}
+                                                    alt="EPUB cover preview"
+                                                    className="h-40 w-28 rounded-md border object-cover"
+                                                />
+                                            </div>
+                                        )}
                                         <p>
                                             <span className="font-semibold">Nhận diện cấu trúc:</span>{" "}
                                             {epubPreviewData.detectedStructureType === "light_novel" ? "Theo quyển" : "Chuẩn"}
