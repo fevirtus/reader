@@ -134,9 +134,6 @@ function ChapterManager() {
 
     // Form states
     const [number, setNumber] = useState("")
-    const [volumeNumber, setVolumeNumber] = useState("")
-    const [volumeTitle, setVolumeTitle] = useState("")
-    const [volumeChapterNumber, setVolumeChapterNumber] = useState("")
     const [title, setTitle] = useState("")
     const [content, setContent] = useState("")
 
@@ -349,9 +346,6 @@ function ChapterManager() {
                 body: JSON.stringify({
                     novelId,
                     number: parseInt(number),
-                    volumeNumber: volumeNumber ? parseInt(volumeNumber) : null,
-                    volumeTitle: volumeTitle.trim() || null,
-                    volumeChapterNumber: volumeChapterNumber ? parseInt(volumeChapterNumber) : null,
                     title,
                     content,
                 }),
@@ -364,9 +358,6 @@ function ChapterManager() {
             setOpenAdd(false)
             setTitle("")
             setContent("")
-            setVolumeNumber("")
-            setVolumeTitle("")
-            setVolumeChapterNumber("")
             setNumber((parseInt(number) + 1).toString())
             fetchChapters()
         } catch (error: any) {
@@ -790,24 +781,6 @@ function ChapterManager() {
                                         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Thiếu niên kỳ bạt" required autoFocus />
                                     </div>
                                 </div>
-                                <details className="group border rounded-lg [&_summary::-webkit-details-marker]:hidden">
-                                    <summary className="flex cursor-pointer items-center justify-between px-4 py-2 bg-muted/30 font-medium">
-                                        <span className="text-sm">Tùy chọn nâng cao (Quyển / Tập)</span>
-                                        <span className="transition duration-300 group-open:-rotate-180">
-                                            <svg fill="none" height="18" shape-rendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="18"><path d="M6 9l6 6 6-6"></path></svg>
-                                        </span>
-                                    </summary>
-                                    <div className="grid grid-cols-6 gap-4 p-4 text-muted-foreground bg-card">
-                                        <div className="space-y-2 col-span-2">
-                                            <label className="text-xs font-medium">Quyển số</label>
-                                            <Input type="number" value={volumeNumber} onChange={(e) => setVolumeNumber(e.target.value)} placeholder="VD: 1" />
-                                        </div>
-                                        <div className="space-y-2 col-span-4">
-                                            <label className="text-xs font-medium">Tên quyển</label>
-                                            <Input value={volumeTitle} onChange={(e) => setVolumeTitle(e.target.value)} placeholder="VD: Khởi đầu mới" />
-                                        </div>
-                                    </div>
-                                </details>
                                 <div className="space-y-2 flex-1 flex flex-col h-full">
                                     <label className="text-sm font-medium">Nội dung văn bản (Hỗ trợ xuống dòng)</label>
                                     <Textarea

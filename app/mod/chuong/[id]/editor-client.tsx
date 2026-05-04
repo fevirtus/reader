@@ -39,9 +39,6 @@ export function EditorClient({ chapterId }: { chapterId: string }) {
     
     // Core states
     const [number, setNumber] = useState("")
-    const [volumeNumber, setVolumeNumber] = useState("")
-    const [volumeTitle, setVolumeTitle] = useState("")
-    const [volumeChapterNumber, setVolumeChapterNumber] = useState("")
     const [title, setTitle] = useState("")
     const [content, setContent] = useState("")
     const [originalNovelId, setOriginalNovelId] = useState("")
@@ -80,9 +77,6 @@ export function EditorClient({ chapterId }: { chapterId: string }) {
                 const data = await res.json()
                 
                 setNumber(data.number.toString())
-                setVolumeNumber(data.volumeNumber ? String(data.volumeNumber) : "")
-                setVolumeTitle(data.volumeTitle || "")
-                setVolumeChapterNumber(data.volumeChapterNumber ? String(data.volumeChapterNumber) : "")
                 setTitle(data.title)
                 setContent(data.content)
                 setOriginalNovelId(data.novelId)
@@ -195,9 +189,6 @@ export function EditorClient({ chapterId }: { chapterId: string }) {
                     id: chapterId,
                     novelId: originalNovelId,
                     number: parseInt(number),
-                    volumeNumber: volumeNumber ? parseInt(volumeNumber) : null,
-                    volumeTitle: volumeTitle.trim() || null,
-                    volumeChapterNumber: volumeChapterNumber ? parseInt(volumeChapterNumber) : null,
                     title,
                     content
                 })
@@ -486,22 +477,10 @@ export function EditorClient({ chapterId }: { chapterId: string }) {
 
             {/* Editor Workspace */}
             <div className="flex flex-col flex-1 pb-4 min-h-0">
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4 shrink-0">
+                <div className="grid grid-cols-1 gap-4 mb-4 shrink-0">
                     <div className="space-y-1">
                         <label className="text-xs font-semibold uppercase text-muted-foreground">Chương số</label>
                         <Input type="number" value={number} onChange={(e) => setNumber(e.target.value)} className="font-mono" />
-                    </div>
-                    <div className="space-y-1">
-                        <label className="text-xs font-semibold uppercase text-muted-foreground">Quyển số</label>
-                        <Input type="number" value={volumeNumber} onChange={(e) => setVolumeNumber(e.target.value)} className="font-mono" placeholder="VD: 1" />
-                    </div>
-                    <div className="space-y-1">
-                        <label className="text-xs font-semibold uppercase text-muted-foreground">Chương trong quyển</label>
-                        <Input type="number" value={volumeChapterNumber} onChange={(e) => setVolumeChapterNumber(e.target.value)} className="font-mono" placeholder="VD: 3" />
-                    </div>
-                    <div className="space-y-1 md:col-span-3">
-                        <label className="text-xs font-semibold uppercase text-muted-foreground">Tên quyển</label>
-                        <Input value={volumeTitle} onChange={(e) => setVolumeTitle(e.target.value)} placeholder="VD: Quyển 1 - Khởi đầu" />
                     </div>
                 </div>
                 <div className="grid grid-cols-1 gap-4 mb-4 shrink-0">

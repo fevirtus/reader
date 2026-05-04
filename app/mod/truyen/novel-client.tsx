@@ -341,15 +341,7 @@ export function NovelClient() {
     }
 
     const fetchSeries = async () => {
-        try {
-            const res = await fetch("/api/mod/series")
-            if (res.ok) {
-                const data = await res.json()
-                setSeriesList(data)
-            }
-        } catch {
-            console.error("Failed to fetch series")
-        }
+        setSeriesList([])
     }
 
     useEffect(() => {
@@ -1250,7 +1242,7 @@ export function NovelClient() {
             })
 
             const data = await res.json()
-            if (!res.ok) throw new Error(data.error || "Lỗi cập nhật")
+            if (!res.ok) throw new Error(data?.detail || data?.error || "Lỗi cập nhật")
 
             toast.success("Cập nhật truyện thành công!")
             setOpenEdit(false)

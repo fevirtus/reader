@@ -40,7 +40,10 @@ export function ImportClient() {
   const [uploadingCover, setUploadingCover] = useState(false)
 
   const [title, setTitle] = useState("")
+  const [originalTitle, setOriginalTitle] = useState("")
   const [author, setAuthor] = useState("")
+  const [originalAuthorName, setOriginalAuthorName] = useState("")
+  const [status, setStatus] = useState("Đang ra")
   const [shortDescription, setShortDescription] = useState("")
   const [genres, setGenres] = useState<Genre[]>([])
   const [selectedGenreIds, setSelectedGenreIds] = useState<string[]>([])
@@ -201,7 +204,10 @@ export function ImportClient() {
       setCoverDetected(Boolean(data?.coverDetected))
       setCoverPreviewUrl(typeof data?.coverPreviewDataUrl === "string" ? data.coverPreviewDataUrl : "")
       setTitle(suggested.title || item.title || "")
+      setOriginalTitle("")
       setAuthor(suggested.author || item.author || "Unknown")
+      setOriginalAuthorName("")
+      setStatus("Đang ra")
       setShortDescription(suggested.shortDescription || "")
       const genreList = await fetchGenres()
       const suggestedGenres: string[] = suggested.genres || []
@@ -286,10 +292,16 @@ export function ImportClient() {
       const res = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: form })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || "Parse preview thất bại")
-      const chapters = Array.isArray(data?.chaptersPreview) ? data.chaptersPreview : []
-      setPreviewItems(chapters.map((c: any) => ({ bucket: "preview", number: c.number || 0, title: c.title || "", chars: (c.excerpt || "").length, preview: c.excerpt || "" })))
-      setChapterCount(Number(data?.novel?.totalChapters || chapters.length || 0))
-      if ((Number(data?.novel?.totalChapters || chapters.length || 0)) <= 0) {
+      const sampled = Array.isArray(data?.sample) ? data.sample : []
+      if (sampled.length > 0) {
+        setPreviewItems(sampled.map((c: any) => ({ bucket: c.bucket || "preview", number: c.number || 0, title: c.title || "", chars: c.chars || 0, preview: c.preview || "" })))
+      } else {
+        const chapters = Array.isArray(data?.chaptersPreview) ? data.chaptersPreview : []
+        setPreviewItems(chapters.map((c: any) => ({ bucket: "preview", number: c.number || 0, title: c.title || "", chars: (c.excerpt || "").length, preview: c.excerpt || "" })))
+      }
+      const total = Number(data?.novel?.totalChapters || data?.chapterCount || 0)
+      setChapterCount(total)
+      if (total <= 0) {
         setParseError("Không tách được chương từ EPUB này với cấu hình hiện tại. Thử đổi TOC/Regex rồi parse lại.")
       }
       toast.success("Đã tạo preview chương")
@@ -311,8 +323,12 @@ export function ImportClient() {
       form.append("splitMode", splitMode)
       if (splitMode === "regex") form.append("chapterRegex", chapterStartPattern)
       form.append("title", title)
+      form.append("originalTitle", originalTitle)
       form.append("authorName", author)
+      form.append("originalAuthorName", originalAuthorName)
+      form.append("status", status)
       form.append("description", shortDescription)
+      form.append("genreIds", selectedGenreIds.join(","))
       form.append("replaceExisting", String(replaceExisting))
       const res = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: form })
       const data = await res.json()
@@ -421,7 +437,18 @@ export function ImportClient() {
             </div>
           </div>
           <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Tiêu đề" />
+          <Input value={originalTitle} onChange={(e) => setOriginalTitle(e.target.value)} placeholder="Tên gốc truyện" />
           <Input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Tác giả" />
+          <Input value={originalAuthorName} onChange={(e) => setOriginalAuthorName(e.target.value)} placeholder="Tên gốc tác giả" />
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option value="Đang ra">Đang ra</option>
+            <option value="Hoàn thành">Hoàn thành</option>
+            <option value="Tạm ngưng">Tạm ngưng</option>
+          </select>
           <Textarea value={shortDescription} onChange={(e) => setShortDescription(e.target.value)} placeholder="Mô tả ngắn" rows={4} />
           <div className="space-y-2 rounded-md border bg-card p-3">
             <div className="flex gap-2">
