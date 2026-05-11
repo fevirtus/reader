@@ -28,7 +28,7 @@ Trang thai tinh nang cho web app `reader`.
 | Feature | Status | Notes |
 |---|---|---|
 | MOD dashboard/workflows | partial | Mot phan route mod da co, tiep tuc bo sung |
-| EPUB import wizard (4 step) | done | `/mod/import` + `/api/import/*` review-first flow |
+| EPUB import wizard | done | `/mod/import`: `/api/mod/the-loai`, `POST /api/import/uploads/preview`, `/api/mod/epub`, `/api/mod/epub/ai-suggest` |
 
 ## Dependencies
 

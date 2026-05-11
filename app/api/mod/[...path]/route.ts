@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie"
+import { readerApiLongFetch } from "@/lib/reader-api-long-fetch"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
+/** Import EPUB nhiều chương + ghi NAS chậm có thể kéo dài nhiều phút (đặc biệt khi Next làm proxy BFF). */
+export const maxDuration = 900
 
 const readerApiOrigin = (process.env.READER_API_ORIGIN || "http://localhost:8000").replace(/\/+$/, "")
 
@@ -21,13 +24,13 @@ async function proxyToReaderApi(req: NextRequest, path: string[]) {
   }
 
   const isBodyMethod = req.method !== "GET" && req.method !== "HEAD"
-  const upstream = await fetch(targetUrl, {
+  const upstream = await readerApiLongFetch(targetUrl, {
     method: req.method,
     headers,
     body: isBodyMethod ? req.body : undefined,
     cache: "no-store",
     duplex: "half",
-  } as any)
+  })
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

@@ -42,9 +42,9 @@ Luon xem `reader-api` la canonical behavior.
 ## Flow 5: MOD EPUB Import Wizard
 
 - Route: `/mod/import`
-- Steps:
-  1. Search source asset by name (`GET /api/import/assets/search`)
-  2. Review metadata + AI suggestion (`preview-metadata`, `ai-suggest`, `review`)
-  3. Parse preview with TOC/regex-start (`POST /api/import/assets/{id}/parse-preview`)
-  4. Start import and poll progress (`start-import`, `GET /api/import/sessions/{sessionId}`)
-- Rule: reviewer confirms metadata before import starts.
+- Steps (khớp `app/mod/import/import-client.tsx`):
+  1. Chọn thể loại / tạo thể loại qua `/api/mod/the-loai`.
+  2. Upload EPUB để preview: `POST /api/import/uploads/preview` (multipart).
+  3. Gợi ý metadata (tuỳ bước): `POST /api/mod/epub/ai-suggest`.
+  4. Import/xử lý EPUB: `POST /api/mod/epub` (multipart; có luồng preview và apply).
+

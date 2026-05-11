@@ -1,7 +1,16 @@
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
 /** @type {import('next').NextConfig} */
 const readerApiOrigin = (process.env.READER_API_ORIGIN || "http://localhost:8000").replace(/\/+$/, "")
 
 const nextConfig = {
+  // Tránh Turbopack suy luận sai root (lỗi: tìm next từ `reader/app` → dev server exit 1).
+  turbopack: {
+    root: __dirname,
+  },
   output: "standalone",
   typescript: {
     ignoreBuildErrors: true,

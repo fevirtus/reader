@@ -17,14 +17,14 @@ Tai lieu nay mo ta vai tro cua `reader` (web app) trong bo 3 he thong: Web + And
   - Mobile: Bearer JWT.
   - Ca hai deu map vao cung user identity trong backend.
 - Data ownership:
-  - PostgreSQL: metadata co cau truc (user, novel, genre, comment, bookmark...).
-  - MongoDB: chapter content, recommendation payload lon.
+  - PostgreSQL (web): metadata co cau truc (user, novel, genre, comment, bookmark...).
+  - Chapter body / file lon: do reader-api orchestrate (NAS storage refs, khong con MongoDB trong stack).
 
 ## Kien truc module web
 
 - App layer (`app/*`): route, rendering, page composition.
 - UI layer (`components/*`): reusable components, khong chua business rule quan trong.
-- Data access layer: goi REST API qua `READER_API_ORIGIN` cho endpoint da migrate.
+- Data access layer: goi REST API qua `READER_API_ORIGIN` (rewrite trong `next.config.mjs` va/hoac proxy trong `app/api/*/route.ts`).
 - Auth adapter: dong bo session NextAuth va profile API.
 
 ## Quy uoc tich hop API

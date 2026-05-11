@@ -257,6 +257,10 @@ export function ImportClient() {
         setSelectedGenreIds(ensuredIds)
       }
       setShortDescription(data?.shortDescription || "")
+      const st = typeof data?.suggestedStatus === "string" ? data.suggestedStatus.trim() : ""
+      if (st === "Đang ra" || st === "Hoàn thành" || st === "Tạm ngưng") {
+        setStatus(st)
+      }
       toast.success("Đã áp dụng gợi ý AI")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "AI suggest lỗi")

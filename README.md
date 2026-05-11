@@ -1,21 +1,20 @@
 # Reader Project
 
-Đây là dự án nền tảng đọc truyện (Web Application) được xây dựng với kiến trúc hiện đại, kết hợp cơ sở dữ liệu quan hệ (PostgreSQL) và NoSQL (MongoDB) để tối ưu hóa việc lưu trữ và truy xuất nội dung văn bản lớn.
+Đây là dự án nền tảng đọc truyện (Web Application) được xây dựng với kiến trúc hiện đại; dữ liệu cấu trúc và metadata người dùng lưu trên PostgreSQL (Prisma), nội dung chương và file quản lý qua API backend (`reader-api`).
 
 ## 🚀 Tính năng nổi bật
 
 - **Xác thực & Phân quyền**: Đăng nhập bằng Google Authentication (NextAuth). Hỗ trợ phân quyền người dùng (USER, MOD, ADMIN).
 - **Quản lý nội dung (Dành cho MOD/ADMIN)**: Dashboard quản lý truyện, tải lên chương mới, quản lý trạng thái truyện (Đang ra, Hoàn thành, Tạm ngưng).
-- **Trải nghiệm đọc**: Khám phá truyện theo thể loại, tìm kiếm truyện, đọc chương truyện với hiệu suất cao (nội dung lưu ở MongoDB).
+- **Trải nghiệm đọc**: Khám phá truyện theo thể loại, tìm kiếm truyện, đọc chương qua API backend.
 - **Tương tác người dùng**: Tính năng tủ sách (bookmark) giúp lưu lại tiến độ đọc, hỗ trợ bình luận ở truyện và từng chương.
 
 ## 🛠 Tech Stack
 
 - **Framework**: [Next.js](https://nextjs.org/) (App Router), React 19
 - **Styling**: [TailwindCSS v4](https://tailwindcss.com/) & [Radix UI](https://www.radix-ui.com/) (shadcn/ui)
-- **Database Hybrid**:
-  - **PostgreSQL**: Lưu trữ dữ liệu cấu trúc (Tài khoản, Truyện, Thể loại, Bình luận, Tủ sách) thông qua **Prisma ORM**.
-  - **MongoDB**: Lưu trữ nội dung lớn (Chương truyện) thông qua **Mongoose**.
+- **Database**:
+  - **PostgreSQL**: Metadata và dữ liệu người dùng trên web (Prisma). Nội dung chương và file do **reader-api** phục vụ (NAS/R2 tùy cấu hình backend).
 - **Auth**: [NextAuth.js](https://next-auth.js.org/)
 
 ---
@@ -25,7 +24,7 @@
 ### 1. Yêu cầu cài đặt
 - [Node.js](https://nodejs.org/) (Khuyến nghị bản LTS)
 - [pnpm](https://pnpm.io/) (Tool quản lý package)
-- Database: PostgreSQL và MongoDB đang chạy cục bộ hoặc trên máy chủ.
+- Database: PostgreSQL (local hoặc máy chủ). Backend `reader-api` dùng chung hoặc riêng tùy triển khai.
 
 ### 2. Cấu hình môi trường
 Tạo file `.env` ở thư mục gốc dựa trên `.env.example` (nếu có) hoặc điền các thông tin sau:
@@ -33,9 +32,6 @@ Tạo file `.env` ở thư mục gốc dựa trên `.env.example` (nếu có) ho
 ```env
 # URL kết nối PostgreSQL
 DATABASE_URL="postgresql://user:password@localhost:5432/reader?schema=public"
-
-# URL kết nối MongoDB
-MONGODB_URI="mongodb://user:password@localhost:27017/reader?authSource=admin"
 
 # Cấu hình NextAuth
 NEXTAUTH_SECRET="your-super-secret-key"
@@ -83,7 +79,12 @@ pnpm dev
 ```
 Truy cập vào [http://localhost:3000](http://localhost:3000) để xem ứng dụng.
 
-Lưu ý: các endpoint user-facing đã migrate (`/api/genres`, `/api/novels/*`, `/api/truyen/*`, `/api/chapters/*`, `/api/user/*`, `/api/auth/mobile-login`) sẽ được proxy sang `READER_API_ORIGIN`.
+Lưu ý: traffic API user-facing và MOD đi qua `READER_API_ORIGIN` theo hai cách:
+
+- **Rewrites** trong `next.config.mjs`: `/api/genres`, `/api/novels/*`, `/api/chapters/*`, `/api/auth/mobile-login`, `/api/health`, `/api/dev/*`.
+- **Route handlers** proxy trong `app/api/*/route.ts`: `/api/truyen/*`, `/api/user/*`, `/api/mod/*`, và `POST /api/import/uploads/preview` (forward request kèm cookie/session).
+
+Một số chỗ server-side gọi API trực tiếp qua `lib/server-api.ts` / `lib/server-auth.ts` (không đi qua rewrite ở trên).
 
 ---
 
