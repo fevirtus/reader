@@ -2,7 +2,11 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
-RUN corepack enable pnpm && pnpm install --frozen-lockfile
+# pnpm v10+ có cơ chế "approve build scripts"; CI/Docker không tương tác được.
+# Dòng dưới đảm bảo Prisma/Sharp được phép build khi cài deps.
+RUN corepack enable pnpm \
+  && pnpm approve-builds --all \
+  && pnpm install --frozen-lockfile
 
 # Stage 2: Builder
 FROM node:22-alpine AS builder
