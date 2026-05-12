@@ -24,11 +24,6 @@ type MissingNovel = {
     description: string
     totalChapters: number
     updatedAt: string
-    series: {
-        id: string
-        name: string
-        slug: string
-    } | null
     genres: Genre[]
     missing: Record<MissingKey, boolean>
 }
@@ -528,7 +523,7 @@ export function MissingFieldsClient() {
                         <Input
                             value={queryInput}
                             onChange={(e) => setQueryInput(e.target.value)}
-                            placeholder="Tìm theo tên truyện, slug, tác giả, series..."
+                            placeholder="Tìm theo tên truyện, slug, tác giả..."
                             onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                     setSearchKeyword(queryInput)
@@ -658,7 +653,7 @@ export function MissingFieldsClient() {
                                                 <Link href={`/truyen/${item.slug}`} className="font-semibold text-primary hover:underline" target="_blank">
                                                     {item.title}
                                                 </Link>
-                                                <p className="text-xs text-muted-foreground">{item.series?.name || "Độc lập"} - {item.totalChapters} chương</p>
+                                                <p className="text-xs text-muted-foreground">{item.totalChapters} chương</p>
                                                 <div className="flex flex-wrap gap-1">
                                                     {allMissingKeys.filter((key) => item.missing[key]).map((key) => (
                                                         <span key={key} className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">

@@ -11,7 +11,6 @@ export default async function ModDashboardPage() {
     let novelCount = 0
     let totalViews = 0
     let commentCount = 0
-    let seriesCount = 0
 
     try {
         const accessToken = (await cookies()).get(AUTH_COOKIE_NAME)?.value || ""
@@ -24,7 +23,6 @@ export default async function ModDashboardPage() {
             novelCount = Number(data?.novelCount || 0)
             totalViews = Number(data?.totalViews || 0)
             commentCount = Number(data?.commentCount || 0)
-            seriesCount = Number(data?.seriesCount || 0)
         }
     } catch (error) {
         console.error("Failed to fetch mod overview", error)
@@ -37,7 +35,7 @@ export default async function ModDashboardPage() {
                 Chào mừng bạn đến với trang quản trị dành cho Moderator.
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="rounded-xl border bg-card text-card-foreground shadow p-6">
                     <h3 className="font-semibold text-lg">Tổng truyện</h3>
                     <p className="text-3xl font-bold mt-2">{novelCount}</p>
@@ -49,10 +47,6 @@ export default async function ModDashboardPage() {
                 <div className="rounded-xl border bg-card text-card-foreground shadow p-6">
                     <h3 className="font-semibold text-lg">Bình luận mới</h3>
                     <p className="text-3xl font-bold mt-2">{commentCount}</p>
-                </div>
-                <div className="rounded-xl border bg-card text-card-foreground shadow p-6">
-                    <h3 className="font-semibold text-lg">Tổng series</h3>
-                    <p className="text-3xl font-bold mt-2">{seriesCount}</p>
                 </div>
             </div>
         </div>

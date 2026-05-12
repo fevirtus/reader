@@ -23,7 +23,6 @@ type SearchSuggestion = {
   slug: string
   authorName: string
   coverUrl?: string | null
-  series?: { id: string; name: string } | null
 }
 
 function roleLabel(role?: "USER" | "MOD" | "ADMIN") {
@@ -149,11 +148,6 @@ export function Header() {
                         <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
                         <p className="truncate text-xs text-muted-foreground">{item.authorName}</p>
                       </div>
-                      {item.series?.name && (
-                        <span className="max-w-[120px] truncate text-[11px] font-medium text-primary">
-                          {item.series.name}
-                        </span>
-                      )}
                     </button>
                   ))
                 ) : (

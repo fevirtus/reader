@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation"
 import Link from "next/link"
-import { BookOpen, Eye, BookMarked, User, Clock, Layers } from "lucide-react"
 import { formatViews } from "@/lib/utils"
 import { GenreBadge } from "@/components/genre-badge"
 import { StarRating } from "@/components/star-rating"
@@ -18,15 +17,6 @@ type NovelGenre = {
   slug: string
 }
 
-type SeriesNovel = {
-  id: string
-  slug: string
-  title: string
-  status: string
-  totalChapters: number
-  coverUrl: string | null
-}
-
 type NovelDetail = {
   id: string
   title: string
@@ -41,14 +31,7 @@ type NovelDetail = {
   views: number
   ratingCount: number
   bookmarkCount: number
-  seriesId: string | null
   genres: NovelGenre[]
-  series: {
-    id: string
-    name: string
-    slug: string
-    novels: SeriesNovel[]
-  } | null
 }
 
 type ChaptersResponse = {
@@ -100,43 +83,29 @@ export default async function NovelDetailPage({
   let totalChapters = 0
   let totalPages = 1
   let firstChapterNumber: number | undefined
-  let seriesVolumes: Array<{
-    id: string
-    slug: string
-    title: string
-    status: string
-    totalChapters: number
-    coverUrl: string | null
-  }> = []
   const [firstChapterData, commentsData, chapterCommentsData, chaptersData] = await Promise.all([
     readerApiFetch<ChaptersResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/chapters?page=1&limit=1`),
     readerApiFetch<CommentsResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/comments?page=1&limit=50`),
     readerApiFetch<CommentsResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/comments?scope=chapter&page=1&limit=50`),
-    novel.seriesId
-      ? Promise.resolve(null)
-      : readerApiFetch<ChaptersResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/chapters?page=${currentPage}&limit=${limit}`),
+    readerApiFetch<ChaptersResponse>(`/api/truyen/${encodeURIComponent(novel.id)}/chapters?page=${currentPage}&limit=${limit}`),
   ])
 
   firstChapterNumber = firstChapterData.chapters[0]?.number
 
-  if (novel.seriesId) {
-    seriesVolumes = novel.series?.novels || []
-  } else if (chaptersData) {
-    totalChapters = chaptersData.totalChapters
-    totalPages = Math.max(1, chaptersData.totalPages || 1)
-    formattedChapters = chaptersData.chapters.map((chapter) => ({
-      id: chapter.id,
-      novelId: novel.id,
-      number: chapter.number,
-      volumeNumber: chapter.volumeNumber ?? null,
-      volumeTitle: chapter.volumeTitle ?? null,
-      volumeChapterNumber: chapter.volumeChapterNumber ?? null,
-      title: chapter.title,
-      createdAt: chapter.createdAt ? chapter.createdAt.split("T")[0] : "",
-      views: chapter.views || 0,
-      content: "",
-    }))
-  }
+  totalChapters = chaptersData.totalChapters
+  totalPages = Math.max(1, chaptersData.totalPages || 1)
+  formattedChapters = chaptersData.chapters.map((chapter) => ({
+    id: chapter.id,
+    novelId: novel.id,
+    number: chapter.number,
+    volumeNumber: chapter.volumeNumber ?? null,
+    volumeTitle: chapter.volumeTitle ?? null,
+    volumeChapterNumber: chapter.volumeChapterNumber ?? null,
+    title: chapter.title,
+    createdAt: chapter.createdAt ? chapter.createdAt.split("T")[0] : "",
+    views: chapter.views || 0,
+    content: "",
+  }))
 
   const comments = commentsData.comments.map((comment) => ({
     id: comment.id,
@@ -242,48 +211,18 @@ export default async function NovelDetailPage({
         <div className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap">{novel.description || ""}</div>
       </section>
 
-      {/* Chapter list or series volumes */}
-      {novel.seriesId ? (
-        <section className="mt-8">
-          <h2 className="mb-3 text-lg font-bold text-foreground">Danh Sách Quyển</h2>
-          <div className="rounded-lg border border-border bg-card divide-y divide-border">
-            {seriesVolumes.map((volume, idx) => (
-              <Link
-                key={volume.id}
-                href={`/truyen/${volume.slug}`}
-                className={`flex items-center gap-4 px-4 py-3 hover:bg-muted/40 transition-colors ${volume.id === novel.id ? "bg-primary/5" : ""}`}
-              >
-                <span className="w-8 text-center text-sm font-semibold text-muted-foreground">{idx + 1}</span>
-                <img
-                  src={volume.coverUrl || "/default-cover.svg"}
-                  alt={volume.title}
-                  className="h-14 w-10 rounded bg-muted object-contain"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-foreground truncate">{volume.title}</p>
-                  <p className="text-xs text-muted-foreground">{volume.totalChapters} chương</p>
-                </div>
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${getNovelStatusBadgeClass(volume.status)}`}>
-                  {volume.status}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : (
-        <section className="mt-8">
-          <h2 className="mb-3 text-lg font-bold text-foreground">Danh Sách Chương</h2>
-          <div className="rounded-lg border border-border bg-card">
-            <ChapterList
-              chapters={formattedChapters as any}
-              novelSlug={novel.slug}
-              currentPage={currentPage}
-              totalPages={totalPages}
-              totalChapters={totalChapters}
-            />
-          </div>
-        </section>
-      )}
+      <section className="mt-8">
+        <h2 className="mb-3 text-lg font-bold text-foreground">Danh Sách Chương</h2>
+        <div className="rounded-lg border border-border bg-card">
+          <ChapterList
+            chapters={formattedChapters as any}
+            novelSlug={novel.slug}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalChapters={totalChapters}
+          />
+        </div>
+      </section>
 
       {/* Comments */}
       <section className="mt-8">

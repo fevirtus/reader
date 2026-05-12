@@ -28,25 +28,11 @@ interface Novel {
     status: string
     totalChapters: number
     coverUrl?: string
-    series?: {
-        id: string
-        name: string
-        slug: string
-    } | null
 }
 
 interface Genre {
     id: string
     name: string
-}
-
-interface SeriesOption {
-    id: string
-    name: string
-    slug: string
-    _count?: {
-        novels: number
-    }
 }
 
 interface EpubPreviewData {
@@ -139,9 +125,6 @@ export function NovelClient() {
     const [epubTitle, setEpubTitle] = useState("")
     const [epubAuthorName, setEpubAuthorName] = useState("")
     const [epubDescription, setEpubDescription] = useState("")
-    const [epubSeriesMode, setEpubSeriesMode] = useState<"none" | "existing" | "new">("none")
-    const [epubSeriesId, setEpubSeriesId] = useState("")
-    const [epubSeriesName, setEpubSeriesName] = useState("")
     const [epubSplitMode, setEpubSplitMode] = useState<"toc" | "regex">("toc")
     const [epubRegexPreset, setEpubRegexPreset] = useState<string>("vi_chuong_hoi")
     const [epubCustomRegex, setEpubCustomRegex] = useState("")
@@ -155,9 +138,6 @@ export function NovelClient() {
     const [originalAuthorName, setOriginalAuthorName] = useState("")
     const [description, setDescription] = useState("")
     const [coverUrl, setCoverUrl] = useState("")
-    const [seriesMode, setSeriesMode] = useState<"none" | "existing" | "new">("none")
-    const [selectedSeriesId, setSelectedSeriesId] = useState("")
-    const [newSeriesName, setNewSeriesName] = useState("")
     const [status, setStatus] = useState("Đang ra")
     
     // View state
@@ -171,7 +151,6 @@ export function NovelClient() {
 
     // Genre states
     const [genres, setGenres] = useState<Genre[]>([])
-    const [seriesList, setSeriesList] = useState<SeriesOption[]>([])
     const [selectedGenres, setSelectedGenres] = useState<string[]>([])
     const [genreQuery, setGenreQuery] = useState("")
     const [addingGenre, setAddingGenre] = useState(false)
@@ -340,14 +319,9 @@ export function NovelClient() {
         }
     }
 
-    const fetchSeries = async () => {
-        setSeriesList([])
-    }
-
     useEffect(() => {
         fetchNovels()
         fetchGenres()
-        fetchSeries()
     }, [])
 
     const normalizeGenreName = (value: string) => value.trim().toLowerCase()
@@ -359,9 +333,6 @@ export function NovelClient() {
         setOriginalAuthorName("")
         setDescription("")
         setCoverUrl("")
-        setSeriesMode("none")
-        setSelectedSeriesId("")
-        setNewSeriesName("")
         setStatus("Đang ra")
         setSelectedGenres([])
         setGenreQuery("")
@@ -377,9 +348,6 @@ export function NovelClient() {
         setOriginalAuthorName((prefill.originalAuthorName || nextAuthor).trim())
         setDescription((prefill.description || "").trim())
         setCoverUrl((prefill.coverUrl || "").trim())
-        setSeriesMode("none")
-        setSelectedSeriesId("")
-        setNewSeriesName("")
         setGenreQuery("")
 
         const validStatus = ["Đang ra", "Hoàn thành", "Tạm ngưng"].includes(prefill.status || "")
@@ -448,7 +416,7 @@ export function NovelClient() {
         if (!keyword) return novels
 
         return novels.filter((novel) => {
-            const searchable = [novel.title, novel.authorName, novel.series?.name || ""].join(" ").toLowerCase()
+            const searchable = [novel.title, novel.authorName].join(" ").toLowerCase()
             return searchable.includes(keyword)
         })
     }, [novels, searchKeyword])
@@ -546,7 +514,6 @@ export function NovelClient() {
             toast.success(`Đã xóa ${data.deletedCount || selectedNovelIds.length} truyện`)
             setSelectedNovelIds([])
             fetchNovels()
-            fetchSeries()
         } catch (error: any) {
             toast.error(error.message || "Lỗi khi xóa hàng loạt")
         } finally {
@@ -720,20 +687,6 @@ export function NovelClient() {
             return
         }
 
-        const resolvedNewSeriesName = seriesMode === "new"
-            ? (newSeriesName.trim() || title.trim())
-            : ""
-
-        if (seriesMode === "existing" && !selectedSeriesId) {
-            toast.error("Vui lòng chọn series đã có")
-            return
-        }
-
-        if (seriesMode === "new" && !resolvedNewSeriesName) {
-            toast.error("Vui lòng nhập tên series mới")
-            return
-        }
-
         setSubmitting(true)
         try {
             const res = await fetch("/api/mod/truyen", {
@@ -747,8 +700,6 @@ export function NovelClient() {
                     description,
                     coverUrl,
                     genreIds: selectedGenres,
-                    seriesId: seriesMode === "existing" ? selectedSeriesId : undefined,
-                    seriesName: seriesMode === "new" ? resolvedNewSeriesName : undefined,
                 }),
             })
             if (!res.ok) throw new Error("Thêm mới thất bại")
@@ -756,7 +707,6 @@ export function NovelClient() {
             setOpenAdd(false)
             resetAddForm()
             fetchNovels()
-            fetchSeries()
         } catch {
             toast.error("Lỗi khi thêm truyện mới")
         } finally {
@@ -775,9 +725,6 @@ export function NovelClient() {
         setEpubTitle("")
         setEpubAuthorName("")
         setEpubDescription("")
-        setEpubSeriesMode("none")
-        setEpubSeriesId("")
-        setEpubSeriesName("")
         setEpubSplitMode("toc")
         setEpubRegexPreset("vi_chuong_hoi")
         setEpubCustomRegex("")
@@ -811,9 +758,6 @@ export function NovelClient() {
         const formData = new FormData()
         formData.append("file", file)
         formData.append("preview", "true")
-        formData.append("seriesMode", epubSeriesMode)
-        if (epubSeriesMode === "existing") formData.append("seriesId", epubSeriesId)
-        if (epubSeriesMode === "new") formData.append("seriesName", epubSeriesName)
         formData.append("splitMode", splitMode)
 
         if (splitMode === "regex") {
@@ -930,25 +874,12 @@ export function NovelClient() {
             return
         }
 
-        if (epubSeriesMode === "existing" && !epubSeriesId) {
-            toast.error("Vui lòng chọn series đã có")
-            return
-        }
-
-        if (epubSeriesMode === "new" && !epubSeriesName.trim()) {
-            toast.error("Vui lòng nhập tên series mới")
-            return
-        }
-
         setUploadingEpub(true)
         const formData = new FormData()
         formData.append("file", pendingEpubFile)
         formData.append("title", epubTitle)
         formData.append("authorName", epubAuthorName)
         formData.append("description", epubDescription)
-        formData.append("seriesMode", epubSeriesMode)
-        if (epubSeriesMode === "existing") formData.append("seriesId", epubSeriesId)
-        if (epubSeriesMode === "new") formData.append("seriesName", epubSeriesName.trim())
         formData.append("splitMode", epubSplitMode)
 
         if (epubSplitMode === "regex") {
@@ -988,7 +919,6 @@ export function NovelClient() {
             }
             resetEpubPreviewState()
             fetchNovels()
-            fetchSeries()
         } catch (err: any) {
             toast.error(err.message || "Có lỗi xảy ra khi xuất bản truyện")
         } finally {
@@ -999,16 +929,6 @@ export function NovelClient() {
     const handleBulkEpubUpload = async () => {
         if (pendingEpubFiles.length === 0) {
             toast.error("Không có file EPUB để tải lên")
-            return
-        }
-
-        if (epubSeriesMode === "existing" && !epubSeriesId) {
-            toast.error("Vui lòng chọn series đã có")
-            return
-        }
-
-        if (epubSeriesMode === "new" && !epubSeriesName.trim()) {
-            toast.error("Vui lòng nhập tên series mới")
             return
         }
 
@@ -1026,9 +946,6 @@ export function NovelClient() {
                 try {
                     const formData = new FormData()
                     formData.append("file", file)
-                    formData.append("seriesMode", epubSeriesMode)
-                    if (epubSeriesMode === "existing") formData.append("seriesId", epubSeriesId)
-                    if (epubSeriesMode === "new") formData.append("seriesName", epubSeriesName.trim())
                     formData.append("splitMode", "toc")
 
                     setBulkProgressItem(fileKey, {
@@ -1119,7 +1036,6 @@ export function NovelClient() {
 
             resetEpubPreviewState()
             fetchNovels()
-            fetchSeries()
         } finally {
             setUploadingEpub(false)
         }
@@ -1161,15 +1077,6 @@ export function NovelClient() {
         setEditingNovel(novel)
         setTitle(novel.title)
         setAuthorName(novel.authorName)
-        if (novel.series?.id) {
-            setSeriesMode("existing")
-            setSelectedSeriesId(novel.series.id)
-            setNewSeriesName("")
-        } else {
-            setSeriesMode("none")
-            setSelectedSeriesId("")
-            setNewSeriesName("")
-        }
         setStatus(novel.status)
         setDescription("")
         setGenreQuery("")
@@ -1186,11 +1093,6 @@ export function NovelClient() {
                 setDescription(data.description || "")
                 setOriginalTitle(data.originalTitle || "")
                 setOriginalAuthorName(data.originalAuthorName || "")
-                if (data.series?.id) {
-                    setSeriesMode("existing")
-                    setSelectedSeriesId(data.series.id)
-                    setNewSeriesName("")
-                }
                 if (data.genres && Array.isArray(data.genres)) {
                     setSelectedGenres(data.genres.map((g: any) => g.id))
                 } else {
@@ -1210,16 +1112,6 @@ export function NovelClient() {
         e.preventDefault()
         if (!editingNovel || !title || !authorName) {
             toast.error("Vui lòng nhập tên truyện và tác giả")
-            return
-        }
-
-        if (seriesMode === "existing" && !selectedSeriesId) {
-            toast.error("Vui lòng chọn series đã có")
-            return
-        }
-
-        if (seriesMode === "new" && !newSeriesName.trim()) {
-            toast.error("Vui lòng nhập tên series mới")
             return
         }
 
@@ -1247,7 +1139,6 @@ export function NovelClient() {
             toast.success("Cập nhật truyện thành công!")
             setOpenEdit(false)
             fetchNovels()
-            fetchSeries()
         } catch (error: any) {
             toast.error(error.message)
         } finally {
@@ -1501,53 +1392,6 @@ export function NovelClient() {
                                             <label className="text-xs font-medium text-muted-foreground">Mô tả</label>
                                             <Textarea value={epubDescription} onChange={(e) => setEpubDescription(e.target.value)} rows={3} />
                                         </div>
-                                        <div className="grid gap-2">
-                                            <label className="text-xs font-medium text-muted-foreground">Series (tùy chọn)</label>
-                                            <select
-                                                value={epubSeriesMode}
-                                                onChange={(e) => {
-                                                    const mode = e.target.value as "none" | "existing" | "new"
-                                                    setEpubSeriesMode(mode)
-                                                    if (mode !== "existing") setEpubSeriesId("")
-                                                    if (mode === "new" && !epubSeriesName.trim()) {
-                                                        setEpubSeriesName(epubTitle.trim())
-                                                    }
-                                                    if (mode !== "new") setEpubSeriesName("")
-                                                }}
-                                                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                            >
-                                                <option value="none">Không gán series</option>
-                                                <option value="existing">Thêm vào series có sẵn</option>
-                                                <option value="new">Tạo series mới</option>
-                                            </select>
-                                        </div>
-
-                                        {epubSeriesMode === "existing" && (
-                                            <div className="grid gap-2">
-                                                <label className="text-xs font-medium text-muted-foreground">Chọn series</label>
-                                                <select
-                                                    value={epubSeriesId}
-                                                    onChange={(e) => setEpubSeriesId(e.target.value)}
-                                                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                                >
-                                                    <option value="">-- Chọn series --</option>
-                                                    {seriesList.map((series) => (
-                                                        <option key={series.id} value={series.id}>{series.name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        )}
-
-                                        {epubSeriesMode === "new" && (
-                                            <div className="grid gap-2">
-                                                <label className="text-xs font-medium text-muted-foreground">Tên series mới</label>
-                                                <Input
-                                                    value={epubSeriesName}
-                                                    onChange={(e) => setEpubSeriesName(e.target.value)}
-                                                    placeholder="Ví dụ: Harry Potter"
-                                                />
-                                            </div>
-                                        )}
                                     </div>
 
                                     <div>
@@ -1604,8 +1448,6 @@ export function NovelClient() {
                                         !epubPreviewData ||
                                         !epubTitle.trim() ||
                                         !epubAuthorName.trim() ||
-                                        (epubSeriesMode === "existing" && !epubSeriesId) ||
-                                        (epubSeriesMode === "new" && !epubSeriesName.trim()) ||
                                         (epubSplitMode === "regex" && epubRegexPreset === "custom" && !epubCustomRegex.trim())
                                     }
                                 >
@@ -1628,9 +1470,9 @@ export function NovelClient() {
                     >
                         <DialogContent className="w-[96vw] max-w-[96vw] sm:!max-w-[920px] max-h-[85vh] overflow-y-auto">
                             <DialogHeader>
-                                <DialogTitle>Import nhiều EPUB vào series</DialogTitle>
+                                <DialogTitle>Import nhiều EPUB</DialogTitle>
                                 <DialogDescription>
-                                    Đã chọn {pendingEpubFiles.length} file EPUB (từ file lẻ hoặc thư mục con). Mỗi file sẽ tạo thành một truyện và được gán vào cùng series.
+                                    Đã chọn {pendingEpubFiles.length} file EPUB (từ file lẻ hoặc thư mục con). Mỗi file sẽ tạo thành một truyện riêng.
                                 </DialogDescription>
                             </DialogHeader>
 
@@ -1716,55 +1558,6 @@ export function NovelClient() {
                                         </div>
                                     </div>
                                 </div>
-
-                                <div className="grid gap-2">
-                                    <label className="text-sm font-medium">Series</label>
-                                    <select
-                                        value={epubSeriesMode}
-                                        onChange={(e) => {
-                                            const mode = e.target.value as "none" | "existing" | "new"
-                                            setEpubSeriesMode(mode)
-                                            if (mode !== "existing") setEpubSeriesId("")
-                                            if (mode === "new" && !epubSeriesName.trim()) {
-                                                const fallbackTitle = pendingEpubFiles[0]?.name?.replace(/\.epub$/i, "") || ""
-                                                setEpubSeriesName(fallbackTitle)
-                                            }
-                                            if (mode !== "new") setEpubSeriesName("")
-                                        }}
-                                        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                    >
-                                        <option value="none">Không gán series</option>
-                                        <option value="existing">Thêm vào series có sẵn</option>
-                                        <option value="new">Tạo series mới</option>
-                                    </select>
-                                </div>
-
-                                {epubSeriesMode === "existing" && (
-                                    <div className="grid gap-2">
-                                        <label className="text-sm font-medium">Chọn series</label>
-                                        <select
-                                            value={epubSeriesId}
-                                            onChange={(e) => setEpubSeriesId(e.target.value)}
-                                            className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                        >
-                                            <option value="">-- Chọn series --</option>
-                                            {seriesList.map((series) => (
-                                                <option key={series.id} value={series.id}>{series.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-
-                                {epubSeriesMode === "new" && (
-                                    <div className="grid gap-2">
-                                        <label className="text-sm font-medium">Tên series mới</label>
-                                        <Input
-                                            value={epubSeriesName}
-                                            onChange={(e) => setEpubSeriesName(e.target.value)}
-                                            placeholder="Ví dụ: Chronicles of Narnia"
-                                        />
-                                    </div>
-                                )}
                             </div>
 
                             <DialogFooter className="sticky bottom-0 bg-background pt-2">
@@ -1773,9 +1566,7 @@ export function NovelClient() {
                                     onClick={handleBulkEpubUpload}
                                     disabled={
                                         uploadingEpub ||
-                                        pendingEpubFiles.length === 0 ||
-                                        (epubSeriesMode === "existing" && !epubSeriesId) ||
-                                        (epubSeriesMode === "new" && !epubSeriesName.trim())
+                                        pendingEpubFiles.length === 0
                                     }
                                 >
                                     {uploadingEpub && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1808,14 +1599,7 @@ export function NovelClient() {
                                     <label className="text-sm font-medium">Tên truyện</label>
                                     <Input
                                         value={title}
-                                        onChange={(e) => {
-                                            const nextTitle = e.target.value
-                                            const shouldSyncSeriesName = seriesMode === "new" && (!newSeriesName.trim() || newSeriesName === title)
-                                            setTitle(nextTitle)
-                                            if (shouldSyncSeriesName) {
-                                                setNewSeriesName(nextTitle)
-                                            }
-                                        }}
+                                        onChange={(e) => setTitle(e.target.value)}
                                         placeholder="Ví dụ: Phàm Nhân Tu Tiên"
                                         autoFocus
                                     />
@@ -1832,51 +1616,6 @@ export function NovelClient() {
                                     <label className="text-sm font-medium">Tác giả gốc (Tùy chọn)</label>
                                     <Input value={originalAuthorName} onChange={(e) => setOriginalAuthorName(e.target.value)} placeholder="Ví dụ: 忘语" />
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium">Series</label>
-                                    <select
-                                        value={seriesMode}
-                                        onChange={(e) => {
-                                            const mode = e.target.value as "none" | "existing" | "new"
-                                            setSeriesMode(mode)
-                                            if (mode !== "existing") setSelectedSeriesId("")
-                                            if (mode === "new" && !newSeriesName.trim()) {
-                                                setNewSeriesName(title.trim())
-                                            }
-                                            if (mode !== "new") setNewSeriesName("")
-                                        }}
-                                        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                    >
-                                        <option value="none">Không gán series</option>
-                                        <option value="existing">Chọn series có sẵn</option>
-                                        <option value="new">Tạo series mới</option>
-                                    </select>
-                                </div>
-                                {seriesMode === "existing" && (
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-medium">Chọn series</label>
-                                        <select
-                                            value={selectedSeriesId}
-                                            onChange={(e) => setSelectedSeriesId(e.target.value)}
-                                            className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                        >
-                                            <option value="">-- Chọn series --</option>
-                                            {seriesList.map((series) => (
-                                                <option key={series.id} value={series.id}>{series.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-                                {seriesMode === "new" && (
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-medium">Tên series mới</label>
-                                        <Input
-                                            value={newSeriesName}
-                                            onChange={(e) => setNewSeriesName(e.target.value)}
-                                            placeholder="Ví dụ: Chronicles of Narnia"
-                                        />
-                                    </div>
-                                )}
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium">Ảnh bìa (Tùy chọn)</label>
                                     <div className="flex gap-2">
@@ -1936,17 +1675,6 @@ export function NovelClient() {
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium">Tác giả gốc (Tùy chọn)</label>
                                         <Input value={originalAuthorName} onChange={(e) => setOriginalAuthorName(e.target.value)} />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-medium">Series</label>
-                                        <Input
-                                            value={editingNovel?.series?.name || "Độc lập"}
-                                            disabled
-                                            className="bg-muted"
-                                        />
-                                        <p className="text-xs text-muted-foreground">
-                                            Không thể chỉnh sửa series tại màn hình sửa truyện.
-                                        </p>
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium">Ảnh bìa (Tùy chọn)</label>
@@ -2028,7 +1756,7 @@ export function NovelClient() {
                         <Input
                             value={searchKeyword}
                             onChange={(e) => setSearchKeyword(e.target.value)}
-                            placeholder="Tìm theo tên truyện, tác giả, series..."
+                            placeholder="Tìm theo tên truyện, tác giả..."
                             className="pl-8"
                         />
                     </div>
@@ -2114,7 +1842,6 @@ export function NovelClient() {
                                     </th>
                                     <th scope="col" className="px-5 py-4 font-semibold">Tên truyện</th>
                                     <th scope="col" className="px-5 py-4 font-semibold">Tác giả</th>
-                                    <th scope="col" className="px-5 py-4 font-semibold">Series</th>
                                     <th scope="col" className="px-5 py-4 font-semibold">Số chương</th>
                                     <th scope="col" className="px-5 py-4 font-semibold">Trạng thái</th>
                                     <th scope="col" className="px-5 py-4 text-right font-semibold">Thao tác</th>
@@ -2122,9 +1849,9 @@ export function NovelClient() {
                             </thead>
                             <tbody>
                                 {loading ? (
-                                    <tr><td colSpan={7} className="p-8 text-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></td></tr>
+                                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></td></tr>
                                 ) : filteredNovels.length === 0 ? (
-                                    <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">Không có truyện phù hợp với từ khóa tìm kiếm.</td></tr>
+                                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">Không có truyện phù hợp với từ khóa tìm kiếm.</td></tr>
                                 ) : (
                                     pagedNovels.map((novel) => (
                                         <tr key={novel.id} className="border-b border-border hover:bg-muted/30 transition-colors last:border-0">
@@ -2145,11 +1872,6 @@ export function NovelClient() {
                                                 {novel.title}
                                             </td>
                                             <td className="px-5 py-4 text-muted-foreground">{novel.authorName}</td>
-                                            <td className="px-5 py-4">
-                                                <span className={`inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${novel.series ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "bg-muted text-muted-foreground"}`}>
-                                                    {novel.series?.name || "Độc lập"}
-                                                </span>
-                                            </td>
                                             <td className="px-5 py-4">
                                                 <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
                                                     {novel.totalChapters}
@@ -2224,11 +1946,6 @@ export function NovelClient() {
                                     <div className="p-3 flex flex-col flex-1">
                                         <h3 className="font-semibold text-sm line-clamp-2 leading-tight mb-1" title={novel.title}>{novel.title}</h3>
                                         <p className="text-xs text-muted-foreground mb-3">{novel.authorName}</p>
-                                        <p className="text-[11px] mb-3">
-                                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold ${novel.series ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" : "bg-muted text-muted-foreground"}`}>
-                                                {novel.series?.name || "Độc lập"}
-                                            </span>
-                                        </p>
                                         
                                         <div className="mt-auto grid grid-cols-3 gap-1.5">
                                             <Button size="sm" variant="outline" className="w-full h-7 text-xs px-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" asChild>

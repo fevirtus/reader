@@ -26,7 +26,6 @@ type BrowseNovel = {
   views: number
   totalChapters: number
   status: string
-  seriesId?: string | null
 }
 
 type BrowseResponse = {
@@ -55,7 +54,7 @@ export default async function GenreDetailPage({
   }
 
   const browse = await readerApiFetch<BrowseResponse>(
-    `/api/novels/browse?genre=${encodeURIComponent(slug)}&sort=${sort}&page=${requestedPage}&limit=${PAGE_SIZE}&collapse_series=true`
+    `/api/novels/browse?genre=${encodeURIComponent(slug)}&sort=${sort}&page=${requestedPage}&limit=${PAGE_SIZE}`
   )
 
   const totalPages = Math.max(1, browse.totalPages || 1)

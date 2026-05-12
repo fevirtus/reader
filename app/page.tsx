@@ -20,7 +20,6 @@ type HomeNovel = {
   status: string
   description: string
   bookmarkCount: number
-  seriesId: string | null
   updatedAt: string | null
 }
 
@@ -51,7 +50,6 @@ type RecommendedByCountItem = {
 
 type RankingEntry = {
   id: string
-  seriesId: string | null
   novel: HomeNovel
   aggregatedViews: number
 }
@@ -188,9 +186,9 @@ export default async function HomePage() {
     randomNovels = [...popularItems].sort(() => Math.random() - 0.5).slice(0, 12)
     latestNovels = latestItems
     recentComments = []
-    weeklyRanking = popularItems.slice(0, 5).map((novel) => ({ id: novel.id, seriesId: novel.seriesId, novel, aggregatedViews: novel.views }))
-    monthlyRanking = popularItems.slice(5, 10).map((novel) => ({ id: novel.id, seriesId: novel.seriesId, novel, aggregatedViews: novel.views }))
-    allTimeRanking = popularItems.slice(10, 15).map((novel) => ({ id: novel.id, seriesId: novel.seriesId, novel, aggregatedViews: novel.views }))
+    weeklyRanking = popularItems.slice(0, 5).map((novel) => ({ id: novel.id, novel, aggregatedViews: novel.views }))
+    monthlyRanking = popularItems.slice(5, 10).map((novel) => ({ id: novel.id, novel, aggregatedViews: novel.views }))
+    allTimeRanking = popularItems.slice(10, 15).map((novel) => ({ id: novel.id, novel, aggregatedViews: novel.views }))
 
     for (const novel of latestNovels) {
       latestChapterMap.set(novel.id, {

@@ -18,7 +18,6 @@ type BrowseNovel = {
   views: number
   totalChapters: number
   status: string
-  seriesId?: string | null
 }
 
 type BrowseResponse = {
@@ -32,24 +31,6 @@ type GenreItem = {
   id: string
   name: string
   slug: string
-}
-
-function collapseSeriesRows<T extends { id: string; seriesId?: string | null }>(rows: T[]): T[] {
-  const pickedSeries = new Set<string>()
-  const output: T[] = []
-
-  for (const row of rows) {
-    if (!row.seriesId) {
-      output.push(row)
-      continue
-    }
-
-    if (pickedSeries.has(row.seriesId)) continue
-    pickedSeries.add(row.seriesId)
-    output.push(row)
-  }
-
-  return output
 }
 
 function buildBrowsePath(params: Record<string, string>) {
@@ -100,7 +81,6 @@ export default async function SearchPage({
         status: statusFilter === "all" ? "" : statusFilter,
         page: String(requestedPage),
         limit: String(PAGE_SIZE),
-        collapse_series: "true",
       })
     )
 

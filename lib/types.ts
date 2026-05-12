@@ -11,11 +11,6 @@ export interface Novel {
   title: string
   slug: string
   authorName: string
-  series?: {
-    id: string
-    name: string
-    slug: string
-  } | null
   coverColor: string
   description: string
   genres: string[]

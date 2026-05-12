@@ -186,6 +186,7 @@ export function ImportBatchClient() {
     formParse.append("preview", "true")
     formParse.append("splitMode", splitMode)
     if (splitMode === "regex") formParse.append("chapterRegex", chapterStartPattern)
+    formParse.append("enforceMaxChapters", "true")
 
     const r3 = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: formParse, signal })
     const d3 = await r3.json().catch(() => ({}))
@@ -199,7 +200,7 @@ export function ImportBatchClient() {
     }
 
     const chapterCount = Number(d3?.novel?.totalChapters ?? d3?.chapterCount ?? 0)
-    if (d3?.importBlocked === true || chapterCount > BATCH_IMPORT_MAX_CHAPTERS) {
+    if (d3?.importBlocked === true) {
       return {
         fileName: displayPath,
         ok: false,
@@ -234,6 +235,7 @@ export function ImportBatchClient() {
     formImport.append("description", description)
     formImport.append("genreIds", genreIds.join(","))
     formImport.append("replaceExisting", String(replaceExisting))
+    formImport.append("enforceMaxChapters", "true")
 
     const r4 = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: formImport, signal })
     const d4 = await r4.json().catch(() => ({}))
@@ -367,8 +369,8 @@ export function ImportBatchClient() {
           Ghi đè nếu trùng tiêu đề (tắt = batch chỉ skip khi đã có truyện cùng tiêu đề)
         </label>
         <p className="text-xs text-muted-foreground">
-          An toàn batch: tối đa {BATCH_IMPORT_MAX_CHAPTERS.toLocaleString()} chương sau khi tách mỗi file; quá{" "}
-          {Math.round(BATCH_IMPORT_MAX_MS_PER_FILE / 60000)} phút/file thì bỏ qua và xử lý file tiếp theo.
+          An toàn batch (chỉ khi import nhiều): tối đa {BATCH_IMPORT_MAX_CHAPTERS.toLocaleString()} chương sau khi tách mỗi file; quá{" "}
+          {Math.round(BATCH_IMPORT_MAX_MS_PER_FILE / 60000)} phút/file thì bỏ qua và xử lý file tiếp theo. Import một EPUB trên trang khác không bị giới hạn này.
         </p>
       </section>
 
