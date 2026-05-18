@@ -36,8 +36,19 @@ export async function POST(req: NextRequest) {
     })
 
     if (!upstream.ok) {
-      const message = await upstream.text()
-      return NextResponse.json({ detail: message || "Authentication failed" }, { status: upstream.status })
+      const raw = await upstream.text()
+      let detail = "Authentication failed"
+      try {
+        const parsed = JSON.parse(raw) as { detail?: unknown }
+        if (typeof parsed.detail === "string") {
+          detail = parsed.detail
+        } else if (raw.trim()) {
+          detail = raw.trim()
+        }
+      } catch {
+        if (raw.trim()) detail = raw.trim()
+      }
+      return NextResponse.json({ detail }, { status: upstream.status })
     }
 
     const data = (await upstream.json()) as MobileLoginResponse
@@ -66,6 +77,19 @@ export async function POST(req: NextRequest) {
     return response
   } catch (error) {
     console.error("/api/auth/login failed", error)
+    const cause = error instanceof Error ? error.cause : null
+    const code =
+      cause && typeof cause === "object" && "code" in cause
+        ? String((cause as { code?: unknown }).code || "")
+        : ""
+    if (code === "ECONNREFUSED" || (error instanceof Error && error.message.includes("fetch failed"))) {
+      return NextResponse.json(
+        {
+          detail: `Không kết nối được reader-api tại ${readerApiOrigin}. Kiểm tra READER_API_ORIGIN và đảm bảo API đang chạy (ví dụ cổng 18080).`,
+        },
+        { status: 503 },
+      )
+    }
     return NextResponse.json({ detail: "Internal Server Error" }, { status: 500 })
   }
 }

@@ -17,6 +17,12 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FileText, Loader2, Plus, ArrowLeft, Wand2, Edit, Trash2, Upload, Search, BookOpen } from "lucide-react"
 import { toast } from "sonner"
+import {
+    appendEpubSplitFormFields,
+    DEFAULT_EPUB_CHAPTER_TAG,
+    EPUB_HTML_TAG_PRESETS,
+    type EpubSplitMode,
+} from "@/lib/epub-split"
 import Link from "next/link"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -58,11 +64,12 @@ interface Chapter {
 interface EpubPreviewData {
     preview: true
     fileName: string
-    splitMode: "toc" | "regex"
+    splitMode: EpubSplitMode
     detectedStructureType: "light_novel" | "standard"
     parserInfo?: {
         splitMode: string
         chapterRegexUsed?: string
+        chapterTagUsed?: string
         regexPreset?: string
         sourceSections: number
         chaptersDetected: number
@@ -116,6 +123,8 @@ function ChapterManager() {
     const [loadingOptimizeSource, setLoadingOptimizeSource] = useState(false)
     const [optRemovePrefix, setOptRemovePrefix] = useState(true)
     const [optRenumber, setOptRenumber] = useState(true)
+    const [optNormalizeTitles, setOptNormalizeTitles] = useState(true)
+    const [optNormalizeGenericOnly, setOptNormalizeGenericOnly] = useState(true)
     const [optimizedChapters, setOptimizedChapters] = useState<Chapter[]>([])
     const [optimizeSourceChapters, setOptimizeSourceChapters] = useState<Chapter[]>([])
 
@@ -147,9 +156,11 @@ function ChapterManager() {
     const [openEpubAppend, setOpenEpubAppend] = useState(false)
     const [epubFile, setEpubFile] = useState<File | null>(null)
     const epubInputRef = useRef<HTMLInputElement>(null)
-    const [epubSplitMode, setEpubSplitMode] = useState<"toc" | "regex">("regex")
+    const [epubSplitMode, setEpubSplitMode] = useState<EpubSplitMode>("regex")
     const [epubRegexPreset, setEpubRegexPreset] = useState("vi_chuong_hoi")
     const [epubCustomRegex, setEpubCustomRegex] = useState("")
+    const [epubTagPreset, setEpubTagPreset] = useState("a")
+    const [epubCustomTag, setEpubCustomTag] = useState(DEFAULT_EPUB_CHAPTER_TAG)
     const [appendingEpub, setAppendingEpub] = useState(false)
     const [epubPreviewData, setEpubPreviewData] = useState<EpubPreviewData | null>(null)
 
@@ -158,6 +169,13 @@ function ChapterManager() {
             return epubCustomRegex.trim()
         }
         return CHAPTER_REGEX_PRESETS.find((preset) => preset.id === epubRegexPreset)?.pattern || CHAPTER_REGEX_PRESETS[0].pattern
+    }
+
+    const getEpubSourceTag = () => {
+        if (epubTagPreset === "custom") {
+            return epubCustomTag.trim() || DEFAULT_EPUB_CHAPTER_TAG
+        }
+        return EPUB_HTML_TAG_PRESETS.find((preset) => preset.id === epubTagPreset)?.tag || DEFAULT_EPUB_CHAPTER_TAG
     }
 
     const handleEpubAppendPreview = async () => {
@@ -170,8 +188,10 @@ function ChapterManager() {
         try {
             const formData = new FormData()
             formData.append("file", epubFile)
-            formData.append("splitMode", epubSplitMode)
-            formData.append("chapterRegex", epubSplitMode === "regex" ? getEpubSourceRegex() : "")
+            appendEpubSplitFormFields(formData, epubSplitMode, {
+                chapterRegex: getEpubSourceRegex(),
+                chapterTag: getEpubSourceTag(),
+            })
             formData.append("chapterRegexPreset", epubRegexPreset)
             formData.append("appendTargetNovelId", novelId)
             formData.append("preview", "true")
@@ -209,8 +229,10 @@ function ChapterManager() {
         try {
             const formData = new FormData()
             formData.append("file", epubFile)
-            formData.append("splitMode", epubSplitMode)
-            formData.append("chapterRegex", epubSplitMode === "regex" ? getEpubSourceRegex() : "")
+            appendEpubSplitFormFields(formData, epubSplitMode, {
+                chapterRegex: getEpubSourceRegex(),
+                chapterTag: getEpubSourceTag(),
+            })
             formData.append("chapterRegexPreset", epubRegexPreset)
             formData.append("appendTargetNovelId", novelId)
 
@@ -256,7 +278,7 @@ function ChapterManager() {
                 })
             })
             const data = await res.json()
-            if (!res.ok) throw new Error(data.error || "Xóa thất bại")
+            if (!res.ok) throw new Error(data.error || data.detail || "Xóa thất bại")
             
             toast.success(`Đã xóa thành công ${data.deletedCount} chương!`, { id: toastId })
             setOpenBulkDelete(false)
@@ -429,7 +451,7 @@ function ChapterManager() {
     const handlePreviewOptimize = async () => {
         if (!novelId) return
 
-        if (!optRemovePrefix && !optRenumber) {
+        if (!optRemovePrefix && !optRenumber && !optNormalizeTitles) {
             toast.error("Vui lòng chọn ít nhất một tùy chọn tối ưu hóa")
             return
         }
@@ -445,6 +467,36 @@ function ChapterManager() {
 
             setOptimizeSourceChapters(allChapters)
             let newChapters = [...allChapters]
+
+            if (optNormalizeTitles) {
+                const previewRes = await fetch("/api/mod/chuong/normalize-titles/preview", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        novelId,
+                        overwriteGenericOnly: optNormalizeGenericOnly,
+                    }),
+                })
+                const previewData = await previewRes.json().catch(() => ({}))
+                if (!previewRes.ok) {
+                    throw new Error(previewData.detail || previewData.error || "Không thể tạo gợi ý tiêu đề chương")
+                }
+                const titleById = new Map<string, string>(
+                    (previewData.items || []).map((item: { id: string; suggestedTitle: string }) => [
+                        item.id,
+                        item.suggestedTitle,
+                    ]),
+                )
+                newChapters = newChapters.map((ch) => {
+                    const key = ch._id || ch.id
+                    const suggested = key ? titleById.get(key) : undefined
+                    return suggested ? { ...ch, title: suggested } : ch
+                })
+                const changeCount = Number(previewData.changeCount || 0)
+                if (changeCount === 0) {
+                    toast.info("Không tìm thấy tiêu đề chương nào cần chuẩn hóa theo bộ lọc hiện tại")
+                }
+            }
 
             if (optRenumber) {
                 newChapters.sort((a, b) => a.number - b.number)
@@ -636,10 +688,10 @@ function ChapterManager() {
                                     <h3 className="font-semibold text-sm border-b pb-2">Giải Thuật Tách Chương</h3>
                                     <div className="flex items-center gap-4">
                                         <Label className="w-1/4">Phiên bản Text</Label>
-                                        <RadioGroup value={epubSplitMode} onValueChange={(v: "toc" | "regex") => {
+                                        <RadioGroup value={epubSplitMode} onValueChange={(v: EpubSplitMode) => {
                                             setEpubSplitMode(v)
                                             setEpubPreviewData(null)
-                                        }} className="flex items-center gap-4">
+                                        }} className="flex flex-wrap items-center gap-4">
                                             <div className="flex items-center space-x-2">
                                                 <RadioGroupItem value="toc" id="toc_mode_a" />
                                                 <Label htmlFor="toc_mode_a" className="cursor-pointer font-normal">Mục lục (TOC)</Label>
@@ -648,8 +700,49 @@ function ChapterManager() {
                                                 <RadioGroupItem value="regex" id="regex_mode_a" />
                                                 <Label htmlFor="regex_mode_a" className="cursor-pointer font-normal">Quy tắc (Regex)</Label>
                                             </div>
+                                            <div className="flex items-center space-x-2">
+                                                <RadioGroupItem value="tag" id="tag_mode_a" />
+                                                <Label htmlFor="tag_mode_a" className="cursor-pointer font-normal">Thẻ HTML</Label>
+                                            </div>
                                         </RadioGroup>
                                     </div>
+
+                                    {epubSplitMode === "tag" && (
+                                        <div className="space-y-3 pt-2">
+                                            <div className="flex flex-col gap-2">
+                                                <Label>Thẻ HTML tách chương</Label>
+                                                <Select value={epubTagPreset} onValueChange={(v) => {
+                                                    setEpubTagPreset(v)
+                                                    setEpubPreviewData(null)
+                                                }}>
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {EPUB_HTML_TAG_PRESETS.map((preset) => (
+                                                            <SelectItem key={preset.id} value={preset.id}>
+                                                                {preset.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                        <SelectItem value="custom">Tùy chỉnh tên thẻ...</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            {epubTagPreset === "custom" && (
+                                                <div className="flex flex-col gap-2">
+                                                    <Label>Tên thẻ (ví dụ: a, h2)</Label>
+                                                    <Input
+                                                        value={epubCustomTag}
+                                                        onChange={(e) => {
+                                                            setEpubCustomTag(e.target.value)
+                                                            setEpubPreviewData(null)
+                                                        }}
+                                                        placeholder="a"
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                     
                                     {epubSplitMode === "regex" && (
                                         <div className="space-y-3 pt-2">
@@ -696,12 +789,15 @@ function ChapterManager() {
                                             <div className="text-xs space-y-1 text-right">
                                                 <p><span className="text-muted-foreground">Flow file HTML:</span> {epubPreviewData.parserInfo.sourceSections}</p>
                                                 <p><span className="text-muted-foreground">Phát hiện:</span> {epubPreviewData.parserInfo.chaptersDetected} chương</p>
+                                                {epubPreviewData.parserInfo.chapterTagUsed && (
+                                                    <p><span className="text-muted-foreground">Thẻ HTML:</span> &lt;{epubPreviewData.parserInfo.chapterTagUsed}&gt;</p>
+                                                )}
                                             </div>
                                         </div>
 
                                         {epubPreviewData.chaptersPreview.length === 0 ? (
                                             <div className="p-4 text-center border border-dashed rounded bg-muted/40 text-muted-foreground text-sm">
-                                                Không tách được chương nào. Xem lại Tùy chọn Tách / Mẫu Regex.
+                                                Không tách được chương nào. Xem lại chế độ tách (TOC / Regex / Thẻ HTML).
                                             </div>
                                         ) : (
                                             <div className="space-y-3 max-h-[300px] overflow-y-auto border rounded-md p-2 bg-card">
@@ -730,7 +826,7 @@ function ChapterManager() {
                             <DialogFooter className="mt-auto pt-4 border-t">
                                 <Button variant="outline" onClick={() => setOpenEpubAppend(false)} disabled={appendingEpub}>Huỷ</Button>
                                 {!epubPreviewData ? (
-                                    <Button onClick={handleEpubAppendPreview} disabled={appendingEpub}>
+                                    <Button onClick={handleEpubAppendPreview} disabled={appendingEpub || (epubSplitMode === "regex" && epubRegexPreset === "custom" && !epubCustomRegex.trim()) || (epubSplitMode === "tag" && epubTagPreset === "custom" && !epubCustomTag.trim())}>
                                         {appendingEpub && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                         Xem trước dữ liệu
                                     </Button>
@@ -885,6 +981,26 @@ function ChapterManager() {
                                         <div>
                                             <p className="font-medium text-base">Đánh lại số thứ tự tự động</p>
                                             <p className="text-sm text-muted-foreground mt-1">Sắp xếp và gán lại số chương liên tục từ 1 đến N để sửa lỗi nhảy cóc</p>
+                                        </div>
+                                    </label>
+                                    <label className="flex items-center gap-3 p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+                                        <input type="checkbox" className="w-5 h-5 rounded" checked={optNormalizeTitles} onChange={(e) => setOptNormalizeTitles(e.target.checked)} />
+                                        <div>
+                                            <p className="font-medium text-base">Chuẩn hóa tiêu đề từ nội dung đầu chương</p>
+                                            <p className="text-sm text-muted-foreground mt-1">
+                                                Ví dụ: dòng <span className="line-through">Chương 8</span> + dòng <strong>Tất Cả Đều Là Ảo Giác</strong> → tiêu đề <strong>Tất Cả Đều Là Ảo Giác</strong>
+                                            </p>
+                                            {optNormalizeTitles && (
+                                                <label className="mt-3 flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="w-4 h-4 rounded"
+                                                        checked={optNormalizeGenericOnly}
+                                                        onChange={(e) => setOptNormalizeGenericOnly(e.target.checked)}
+                                                    />
+                                                    Chỉ sửa tiêu đề dạng &quot;Chương N&quot; (giữ tiêu đề đã đặt tay)
+                                                </label>
+                                            )}
                                         </div>
                                     </label>
                                 </div>

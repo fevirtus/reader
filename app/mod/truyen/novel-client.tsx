@@ -18,7 +18,13 @@ import { toast } from "sonner"
 import Link from "next/link"
 import { getNovelStatusBadgeClass } from "@/lib/novel-status"
 import { Progress } from "@/components/ui/progress"
-import { MOD_AI_PREFILL_STORAGE_KEY, type AINovelPrefillPayload } from "@/lib/mod-ai-tools"
+import {
+    appendEpubSplitFormFields,
+    DEFAULT_EPUB_CHAPTER_TAG,
+    EPUB_HTML_TAG_PRESETS,
+    type EpubSplitMode,
+    splitModeLabel,
+} from "@/lib/epub-split"
 
 interface Novel {
     id: string
@@ -37,13 +43,14 @@ interface Genre {
 
 interface EpubPreviewData {
     fileName: string
-    splitMode: "toc" | "regex"
+    splitMode: EpubSplitMode
     detectedStructureType: "standard" | "light_novel"
     hasCoverFromEpub?: boolean
     coverPreviewDataUrl?: string | null
     parserInfo?: {
-        splitMode: "toc" | "regex"
+        splitMode: EpubSplitMode
         chapterRegexUsed?: string | null
+        chapterTagUsed?: string | null
         regexPreset?: string | null
         sourceSections: number
         chaptersDetected: number
@@ -125,9 +132,11 @@ export function NovelClient() {
     const [epubTitle, setEpubTitle] = useState("")
     const [epubAuthorName, setEpubAuthorName] = useState("")
     const [epubDescription, setEpubDescription] = useState("")
-    const [epubSplitMode, setEpubSplitMode] = useState<"toc" | "regex">("toc")
+    const [epubSplitMode, setEpubSplitMode] = useState<EpubSplitMode>("toc")
     const [epubRegexPreset, setEpubRegexPreset] = useState<string>("vi_chuong_hoi")
     const [epubCustomRegex, setEpubCustomRegex] = useState("")
+    const [epubTagPreset, setEpubTagPreset] = useState<string>("a")
+    const [epubCustomTag, setEpubCustomTag] = useState(DEFAULT_EPUB_CHAPTER_TAG)
     const epubInputRef = useRef<HTMLInputElement>(null)
     const epubFolderInputRef = useRef<HTMLInputElement>(null)
 
@@ -167,7 +176,6 @@ export function NovelClient() {
     const [pageSize, setPageSize] = useState(20)
     const [bulkProgress, setBulkProgress] = useState<Record<string, BulkUploadProgressItem>>({})
     const [bulkDuplicateHandling, setBulkDuplicateHandling] = useState<BulkDuplicateHandling>("ask")
-    const [pendingAIPrefill, setPendingAIPrefill] = useState<AINovelPrefillPayload | null>(null)
 
     const getSelectedChapterRegex = () => {
         if (epubRegexPreset === "custom") {
@@ -175,6 +183,13 @@ export function NovelClient() {
         }
 
         return CHAPTER_REGEX_PRESETS.find((preset) => preset.id === epubRegexPreset)?.pattern || CHAPTER_REGEX_PRESETS[0].pattern
+    }
+
+    const getSelectedChapterTag = () => {
+        if (epubTagPreset === "custom") {
+            return epubCustomTag.trim() || DEFAULT_EPUB_CHAPTER_TAG
+        }
+        return EPUB_HTML_TAG_PRESETS.find((preset) => preset.id === epubTagPreset)?.tag || DEFAULT_EPUB_CHAPTER_TAG
     }
 
     const normalizeEpubFiles = (files: File[]) => {
@@ -337,79 +352,6 @@ export function NovelClient() {
         setSelectedGenres([])
         setGenreQuery("")
     }
-
-    const applyAIPrefillToAddForm = (prefill: AINovelPrefillPayload) => {
-        const nextTitle = prefill.title?.trim() || ""
-        const nextAuthor = prefill.authorName?.trim() || ""
-
-        setTitle(nextTitle)
-        setOriginalTitle((prefill.originalTitle || nextTitle).trim())
-        setAuthorName(nextAuthor)
-        setOriginalAuthorName((prefill.originalAuthorName || nextAuthor).trim())
-        setDescription((prefill.description || "").trim())
-        setCoverUrl((prefill.coverUrl || "").trim())
-        setGenreQuery("")
-
-        const validStatus = ["Đang ra", "Hoàn thành", "Tạm ngưng"].includes(prefill.status || "")
-            ? (prefill.status as "Đang ra" | "Hoàn thành" | "Tạm ngưng")
-            : "Đang ra"
-        setStatus(validStatus)
-
-        const suggestedGenres = Array.isArray(prefill.genresSuggested) ? prefill.genresSuggested : []
-        if (suggestedGenres.length === 0 || genres.length === 0) {
-            setSelectedGenres([])
-            return
-        }
-
-        const byName = new Map(genres.map((genre) => [normalizeGenreName(genre.name), genre.id]))
-        const pickedIds: string[] = []
-        const missing: string[] = []
-
-        for (const name of suggestedGenres) {
-            const id = byName.get(normalizeGenreName(name))
-            if (!id) {
-                missing.push(name)
-                continue
-            }
-            if (!pickedIds.includes(id)) pickedIds.push(id)
-        }
-
-        setSelectedGenres(pickedIds)
-
-        if (missing.length > 0) {
-            toast.info(`The loai goi y chua co san: ${missing.slice(0, 4).join(", ")}`)
-        }
-    }
-
-    useEffect(() => {
-        if (typeof window === "undefined") return
-
-        const raw = window.localStorage.getItem(MOD_AI_PREFILL_STORAGE_KEY)
-        if (!raw) return
-
-        window.localStorage.removeItem(MOD_AI_PREFILL_STORAGE_KEY)
-        try {
-            const parsed = JSON.parse(raw) as AINovelPrefillPayload
-            setPendingAIPrefill(parsed)
-            setOpenAdd(true)
-        } catch {
-            toast.error("Du lieu AI Tool khong hop le")
-        }
-    }, [])
-
-    useEffect(() => {
-        if (!pendingAIPrefill) return
-
-        const needsGenres = Array.isArray(pendingAIPrefill.genresSuggested)
-            && pendingAIPrefill.genresSuggested.length > 0
-            && genres.length === 0
-
-        if (needsGenres) return
-
-        applyAIPrefillToAddForm(pendingAIPrefill)
-        setPendingAIPrefill(null)
-        toast.success("Da nap du lieu de xuat tu AI Tool")
-    }, [pendingAIPrefill, genres])
 
     const filteredNovels = useMemo(() => {
         const keyword = searchKeyword.trim().toLowerCase()
@@ -739,7 +681,7 @@ export function NovelClient() {
     const requestEpubPreview = async (
         file: File,
         options?: {
-            splitMode?: "toc" | "regex"
+            splitMode?: EpubSplitMode
             regexPreset?: string
             regexInput?: string
             preserveEditedMetadata?: boolean
@@ -758,11 +700,12 @@ export function NovelClient() {
         const formData = new FormData()
         formData.append("file", file)
         formData.append("preview", "true")
-        formData.append("splitMode", splitMode)
-
+        appendEpubSplitFormFields(formData, splitMode, {
+            chapterRegex: regexInput,
+            chapterTag: getSelectedChapterTag(),
+        })
         if (splitMode === "regex") {
             formData.append("chapterRegexPreset", regexPreset)
-            formData.append("chapterRegex", regexInput)
         }
 
         const res = await fetch("/api/mod/epub", {
@@ -873,6 +816,10 @@ export function NovelClient() {
             toast.error("Vui lòng nhập regex tùy chỉnh trước khi tải lên")
             return
         }
+        if (epubSplitMode === "tag" && epubTagPreset === "custom" && !epubCustomTag.trim()) {
+            toast.error("Vui lòng nhập tên thẻ HTML trước khi tải lên")
+            return
+        }
 
         setUploadingEpub(true)
         const formData = new FormData()
@@ -880,12 +827,13 @@ export function NovelClient() {
         formData.append("title", epubTitle)
         formData.append("authorName", epubAuthorName)
         formData.append("description", epubDescription)
-        formData.append("splitMode", epubSplitMode)
+        appendEpubSplitFormFields(formData, epubSplitMode, {
+            chapterRegex: epubRegexPreset === "custom" ? epubCustomRegex.trim() : getSelectedChapterRegex(),
+            chapterTag: getSelectedChapterTag(),
+        })
 
         if (epubSplitMode === "regex") {
-            const selectedRegex = epubRegexPreset === "custom" ? epubCustomRegex.trim() : getSelectedChapterRegex()
             formData.append("chapterRegexPreset", epubRegexPreset)
-            formData.append("chapterRegex", selectedRegex)
         }
 
         try {
@@ -1286,7 +1234,8 @@ export function NovelClient() {
                                             <>
                                                 <p>
                                                     <span className="font-semibold">Parser:</span>{" "}
-                                                    {epubPreviewData.parserInfo.splitMode === "regex" ? "Regex" : "TOC"}
+                                                    {splitModeLabel(epubPreviewData.parserInfo.splitMode)}
+                                                    {epubPreviewData.parserInfo.chapterTagUsed ? ` (${epubPreviewData.parserInfo.chapterTagUsed})` : ""}
                                                 </p>
                                                 <p>
                                                     <span className="font-semibold">Nguồn phân tích:</span>{" "}
@@ -1310,6 +1259,12 @@ export function NovelClient() {
                                                         {epubPreviewData.parserInfo.chapterRegexUsed}
                                                     </p>
                                                 )}
+                                                {epubPreviewData.parserInfo.chapterTagUsed && (
+                                                    <p>
+                                                        <span className="font-semibold">Thẻ HTML dùng:</span>{" "}
+                                                        &lt;{epubPreviewData.parserInfo.chapterTagUsed}&gt;
+                                                    </p>
+                                                )}
                                             </>
                                         )}
                                     </div>
@@ -1321,13 +1276,30 @@ export function NovelClient() {
                                                 <label className="text-xs font-medium text-muted-foreground">Chế độ tách chương</label>
                                                 <select
                                                     value={epubSplitMode}
-                                                    onChange={(e) => setEpubSplitMode(e.target.value as "toc" | "regex")}
+                                                    onChange={(e) => setEpubSplitMode(e.target.value as EpubSplitMode)}
                                                     className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
                                                 >
                                                     <option value="toc">Theo TOC trong EPUB</option>
                                                     <option value="regex">Theo Regex</option>
+                                                    <option value="tag">Theo thẻ HTML</option>
                                                 </select>
                                             </div>
+
+                                            {epubSplitMode === "tag" && (
+                                                <div className="grid gap-2">
+                                                    <label className="text-xs font-medium text-muted-foreground">Thẻ tách chương</label>
+                                                    <select
+                                                        value={epubTagPreset}
+                                                        onChange={(e) => setEpubTagPreset(e.target.value)}
+                                                        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                                    >
+                                                        {EPUB_HTML_TAG_PRESETS.map((preset) => (
+                                                            <option key={preset.id} value={preset.id}>{preset.name}</option>
+                                                        ))}
+                                                        <option value="custom">Tự nhập tên thẻ</option>
+                                                    </select>
+                                                </div>
+                                            )}
 
                                             {epubSplitMode === "regex" && (
                                                 <div className="grid gap-2">
@@ -1365,12 +1337,35 @@ export function NovelClient() {
                                             </>
                                         )}
 
+                                        {epubSplitMode === "tag" && (
+                                            <>
+                                                {epubTagPreset !== "custom" ? (
+                                                    <div className="rounded-md bg-muted/40 p-2 text-xs">
+                                                        Mỗi thẻ &lt;{getSelectedChapterTag()}&gt; mở đầu một chương. Tiêu đề lấy từ nội dung trong thẻ (nếu có).
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid gap-2">
+                                                        <label className="text-xs font-medium text-muted-foreground">Tên thẻ HTML</label>
+                                                        <Input
+                                                            value={epubCustomTag}
+                                                            onChange={(e) => setEpubCustomTag(e.target.value)}
+                                                            placeholder="Ví dụ: a, h2, h1"
+                                                        />
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+
                                         <div className="flex justify-end">
                                             <Button
                                                 type="button"
                                                 variant="secondary"
                                                 onClick={handleReparseEpub}
-                                                disabled={previewingEpub || (epubSplitMode === "regex" && epubRegexPreset === "custom" && !epubCustomRegex.trim())}
+                                                disabled={
+                                                    previewingEpub
+                                                    || (epubSplitMode === "regex" && epubRegexPreset === "custom" && !epubCustomRegex.trim())
+                                                    || (epubSplitMode === "tag" && epubTagPreset === "custom" && !epubCustomTag.trim())
+                                                }
                                             >
                                                 {previewingEpub && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                                 Phân tích lại theo cấu hình

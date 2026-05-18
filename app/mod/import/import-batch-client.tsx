@@ -6,6 +6,12 @@ import { Loader2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { toast } from "sonner"
+import {
+  appendEpubSplitFormFields,
+  DEFAULT_EPUB_CHAPTER_TAG,
+  EPUB_HTML_TAG_PRESETS,
+  type EpubSplitMode,
+} from "@/lib/epub-split"
 
 /** Đồng bộ với `MOD_EPUB_MAX_CHAPTERS` trên reader-api. */
 const BATCH_IMPORT_MAX_CHAPTERS = 4000
@@ -46,10 +52,17 @@ function normalizeNovelTitle(raw: string): string {
 }
 
 export function ImportBatchClient() {
-  const [splitMode, setSplitMode] = useState<"toc" | "regex">("toc")
+  const [splitMode, setSplitMode] = useState<EpubSplitMode>("toc")
   const [chapterStartPattern, setChapterStartPattern] = useState(
     "^\\s*(?:[#>*\\-\\[]\\s*)*(?:ch(?:u\\.?|ương|uong)?|chapter|hồi|hoi|quyển|quyen|phần|phan|tập|tap)\\s*\\d+(?:[\\.:\\-\\)]\\s*|\\s+).+$",
   )
+  const [tagPreset, setTagPreset] = useState("a")
+  const [customTag, setCustomTag] = useState(DEFAULT_EPUB_CHAPTER_TAG)
+
+  const getChapterTag = () => {
+    if (tagPreset === "custom") return customTag.trim() || DEFAULT_EPUB_CHAPTER_TAG
+    return EPUB_HTML_TAG_PRESETS.find((p) => p.id === tagPreset)?.tag || DEFAULT_EPUB_CHAPTER_TAG
+  }
   const [replaceExisting, setReplaceExisting] = useState(false)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
@@ -142,8 +155,10 @@ export function ImportBatchClient() {
 
     const formAi = new FormData()
     formAi.append("file", file)
-    formAi.append("splitMode", splitMode)
-    if (splitMode === "regex") formAi.append("chapterRegex", chapterStartPattern)
+    appendEpubSplitFormFields(formAi, splitMode, {
+      chapterRegex: chapterStartPattern,
+      chapterTag: getChapterTag(),
+    })
     formAi.append("title", title)
     formAi.append("authorName", author)
 
@@ -184,8 +199,10 @@ export function ImportBatchClient() {
     const formParse = new FormData()
     formParse.append("file", file)
     formParse.append("preview", "true")
-    formParse.append("splitMode", splitMode)
-    if (splitMode === "regex") formParse.append("chapterRegex", chapterStartPattern)
+    appendEpubSplitFormFields(formParse, splitMode, {
+      chapterRegex: chapterStartPattern,
+      chapterTag: getChapterTag(),
+    })
     formParse.append("enforceMaxChapters", "true")
 
     const r3 = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: formParse, signal })
@@ -220,15 +237,17 @@ export function ImportBatchClient() {
         fileName: displayPath,
         ok: false,
         resolvedTitle: title,
-        error: "Bước 3: không tách được chương với cấu hình TOC/Regex hiện tại",
+        error: "Bước 3: không tách được chương với cấu hình TOC/Regex/Thẻ HTML hiện tại",
       }
     }
 
     const formImport = new FormData()
     formImport.append("file", file)
     formImport.append("preview", "false")
-    formImport.append("splitMode", splitMode)
-    if (splitMode === "regex") formImport.append("chapterRegex", chapterStartPattern)
+    appendEpubSplitFormFields(formImport, splitMode, {
+      chapterRegex: chapterStartPattern,
+      chapterTag: getChapterTag(),
+    })
     formImport.append("title", title)
     formImport.append("authorName", author)
     formImport.append("status", status)
@@ -348,11 +367,12 @@ export function ImportBatchClient() {
           <select
             className="rounded border px-2 py-1 text-sm"
             value={splitMode}
-            onChange={(e) => setSplitMode(e.target.value as "toc" | "regex")}
+            onChange={(e) => setSplitMode(e.target.value as EpubSplitMode)}
             disabled={running}
           >
             <option value="toc">TOC</option>
             <option value="regex">Regex tiếng Việt</option>
+            <option value="tag">Thẻ HTML</option>
           </select>
           {splitMode === "regex" && (
             <Input
@@ -362,6 +382,30 @@ export function ImportBatchClient() {
               disabled={running}
               placeholder="Regex bắt đầu chương"
             />
+          )}
+          {splitMode === "tag" && (
+            <>
+              <select
+                className="rounded border px-2 py-1 text-sm"
+                value={tagPreset}
+                onChange={(e) => setTagPreset(e.target.value)}
+                disabled={running}
+              >
+                {EPUB_HTML_TAG_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>{preset.name}</option>
+                ))}
+                <option value="custom">Tùy chỉnh tên thẻ...</option>
+              </select>
+              {tagPreset === "custom" && (
+                <Input
+                  className="max-w-[120px] font-mono text-xs"
+                  value={customTag}
+                  onChange={(e) => setCustomTag(e.target.value)}
+                  disabled={running}
+                  placeholder="a, h2"
+                />
+              )}
+            </>
           )}
         </div>
         <label className="flex items-center gap-2 text-sm">

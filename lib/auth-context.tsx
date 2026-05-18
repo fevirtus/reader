@@ -68,6 +68,9 @@ async function initializeGoogleIdentity(clientId: string): Promise<void> {
 
   if (googleInitializedClientId === clientId) return
 
+  const hostname = typeof window !== "undefined" ? window.location.hostname : ""
+  const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1"
+
   // Re-initialize with new clientId (or first time)
   googleApi.initialize({
     client_id: clientId,
@@ -86,7 +89,8 @@ async function initializeGoogleIdentity(clientId: string): Promise<void> {
     },
     auto_select: false,
     cancel_on_tap_outside: true,
-    use_fedcm_for_prompt: true,
+    // FedCM on localhost often yields tokens backend cannot verify; production keeps FedCM.
+    use_fedcm_for_prompt: !isLocalHost,
   })
 
   googleInitializedClientId = clientId

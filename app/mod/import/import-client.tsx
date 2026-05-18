@@ -7,6 +7,12 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { toast } from "sonner"
+import {
+  appendEpubSplitFormFields,
+  DEFAULT_EPUB_CHAPTER_TAG,
+  EPUB_HTML_TAG_PRESETS,
+  type EpubSplitMode,
+} from "@/lib/epub-split"
 
 type AssetItem = {
   id: string
@@ -49,8 +55,15 @@ export function ImportClient() {
   const [selectedGenreIds, setSelectedGenreIds] = useState<string[]>([])
   const [genreQuery, setGenreQuery] = useState("")
   const [addingGenre, setAddingGenre] = useState(false)
-  const [splitMode, setSplitMode] = useState<"toc" | "regex">("toc")
+  const [splitMode, setSplitMode] = useState<EpubSplitMode>("toc")
   const [chapterStartPattern, setChapterStartPattern] = useState("^\\s*(?:[#>*\\-\\[]\\s*)*(?:ch(?:u\\.?|ương|uong)?|chapter|hồi|hoi|quyển|quyen|phần|phan|tập|tap)\\s*\\d+(?:[\\.:\\-\\)]\\s*|\\s+).+$")
+  const [tagPreset, setTagPreset] = useState("a")
+  const [customTag, setCustomTag] = useState(DEFAULT_EPUB_CHAPTER_TAG)
+
+  const getChapterTag = () => {
+    if (tagPreset === "custom") return customTag.trim() || DEFAULT_EPUB_CHAPTER_TAG
+    return EPUB_HTML_TAG_PRESETS.find((p) => p.id === tagPreset)?.tag || DEFAULT_EPUB_CHAPTER_TAG
+  }
   const [replaceExisting, setReplaceExisting] = useState(false)
 
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -242,8 +255,10 @@ export function ImportClient() {
       const form = new FormData()
       form.append("file", epubFile)
       form.append("preview", "true")
-      form.append("splitMode", splitMode)
-      if (splitMode === "regex") form.append("chapterRegex", chapterStartPattern)
+      appendEpubSplitFormFields(form, splitMode, {
+        chapterRegex: chapterStartPattern,
+        chapterTag: getChapterTag(),
+      })
       form.append("title", title)
       form.append("authorName", author)
       const res = await fetch("/api/mod/epub/ai-suggest", { method: "POST", credentials: "include", body: form })
@@ -291,8 +306,10 @@ export function ImportClient() {
       const form = new FormData()
       form.append("file", epubFile)
       form.append("preview", "true")
-      form.append("splitMode", splitMode)
-      if (splitMode === "regex") form.append("chapterRegex", chapterStartPattern)
+      appendEpubSplitFormFields(form, splitMode, {
+        chapterRegex: chapterStartPattern,
+        chapterTag: getChapterTag(),
+      })
       const res = await fetch("/api/mod/epub", { method: "POST", credentials: "include", body: form })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || "Parse preview thất bại")
@@ -306,7 +323,7 @@ export function ImportClient() {
       const total = Number(data?.novel?.totalChapters || data?.chapterCount || 0)
       setChapterCount(total)
       if (total <= 0) {
-        setParseError("Không tách được chương từ EPUB này với cấu hình hiện tại. Thử đổi TOC/Regex rồi parse lại.")
+        setParseError("Không tách được chương từ EPUB này với cấu hình hiện tại. Thử đổi TOC / Regex / Thẻ HTML rồi parse lại.")
       }
       toast.success("Đã tạo preview chương")
     } catch (error) {
@@ -324,8 +341,10 @@ export function ImportClient() {
       const form = new FormData()
       form.append("file", epubFile)
       form.append("preview", "false")
-      form.append("splitMode", splitMode)
-      if (splitMode === "regex") form.append("chapterRegex", chapterStartPattern)
+      appendEpubSplitFormFields(form, splitMode, {
+        chapterRegex: chapterStartPattern,
+        chapterTag: getChapterTag(),
+      })
       form.append("title", title)
       form.append("originalTitle", originalTitle)
       form.append("authorName", author)
@@ -351,7 +370,7 @@ export function ImportClient() {
     setPreviewItems([])
     setChapterCount(0)
     setParseError("")
-  }, [splitMode, chapterStartPattern])
+  }, [splitMode, chapterStartPattern, tagPreset, customTag])
 
   useEffect(() => {
     if (step === 3 && asset) {
@@ -523,12 +542,26 @@ export function ImportClient() {
         <section className="space-y-3 rounded-xl border p-4">
           <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 p-3">
             <label className="text-sm font-medium">Tách chương:</label>
-            <select className="rounded border px-2 py-1 text-sm" value={splitMode} onChange={(e) => setSplitMode(e.target.value as "toc" | "regex")}>
+            <select className="rounded border px-2 py-1 text-sm" value={splitMode} onChange={(e) => setSplitMode(e.target.value as EpubSplitMode)}>
               <option value="toc">TOC (lọc intro/mục lục)</option>
               <option value="regex">Regex tiếng Việt</option>
+              <option value="tag">Thẻ HTML</option>
             </select>
             {splitMode === "regex" && (
               <Input value={chapterStartPattern} onChange={(e) => setChapterStartPattern(e.target.value)} placeholder="Regex bắt đầu chương" />
+            )}
+            {splitMode === "tag" && (
+              <>
+                <select className="rounded border px-2 py-1 text-sm" value={tagPreset} onChange={(e) => setTagPreset(e.target.value)}>
+                  {EPUB_HTML_TAG_PRESETS.map((preset) => (
+                    <option key={preset.id} value={preset.id}>{preset.name}</option>
+                  ))}
+                  <option value="custom">Tùy chỉnh tên thẻ...</option>
+                </select>
+                {tagPreset === "custom" && (
+                  <Input value={customTag} onChange={(e) => setCustomTag(e.target.value)} placeholder="Ví dụ: a, h2" className="max-w-[120px]" />
+                )}
+              </>
             )}
           </div>
           <div className="flex items-center justify-between">
