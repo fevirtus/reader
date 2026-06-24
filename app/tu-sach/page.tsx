@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context"
 import { useBookmarks } from "@/lib/bookmark-context"
 import { useRecommendations } from "@/lib/recommendation-context"
 import { getNovelStatusBadgeClass } from "@/lib/novel-status"
+import { resolveBookshelfShelfStatus } from "@/lib/bookshelf-status"
 import { cn } from "@/lib/utils"
 
 type Tab = "dang-doc" | "danh-dau" | "da-doc" | "de-cu"
@@ -113,9 +114,13 @@ export default function BookshelfPage() {
 
   const withNovel = bookmarks.filter((b) => b.novel).map((b) => ({ novel: b.novel as any, bookmark: b }))
 
-  const dangDocList  = withNovel.filter(({ bookmark, novel }) => bookmark.lastChapterNumber && bookmark.lastChapterNumber < (novel.totalChapters ?? Infinity))
+  const dangDocList = withNovel.filter(
+    ({ bookmark, novel }) => resolveBookshelfShelfStatus(bookmark, novel) === "reading",
+  )
   const daDanhDauList = withNovel
-  const daDocList    = withNovel.filter(({ bookmark, novel }) => bookmark.lastChapterNumber && bookmark.lastChapterNumber >= (novel.totalChapters ?? 0) && novel.totalChapters > 0)
+  const daDocList = withNovel.filter(
+    ({ bookmark, novel }) => resolveBookshelfShelfStatus(bookmark, novel) === "completed",
+  )
   const deCuList     = recommendations.filter((r) => r.novel)
 
   const counts: Record<Tab, number> = {

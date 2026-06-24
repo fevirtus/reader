@@ -62,6 +62,8 @@ export interface Bookmark {
   novelId: string
   lastChapterId?: string
   lastChapterNumber?: number
+  readChapters?: number[]
+  shelfStatus?: "reading" | "completed" | "saved"
   addedAt: string
   novel?: any
 }
