@@ -3,7 +3,6 @@ import { Be_Vietnam_Pro } from 'next/font/google'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AuthProvider } from '@/lib/auth-context'
 import { BookmarkProvider } from '@/lib/bookmark-context'
-import { RecommendationProvider } from '@/lib/recommendation-context'
 import { Header } from '@/components/header'
 import { Footer } from '@/components/footer'
 import { Toaster } from 'sonner'
@@ -56,13 +55,11 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <AuthProvider>
             <BookmarkProvider>
-              <RecommendationProvider>
                 <div className="flex min-h-svh flex-col">
                   <Header />
                   <main className="flex-1">{children}</main>
                   <Footer />
                 </div>
-              </RecommendationProvider>
             </BookmarkProvider>
           </AuthProvider>
         </ThemeProvider>

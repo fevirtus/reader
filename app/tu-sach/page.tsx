@@ -2,22 +2,19 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { BookOpen, BookMarked, Star, Trash2, CheckCircle2 } from "lucide-react"
+import { BookOpen, Trash2, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
 import { useBookmarks } from "@/lib/bookmark-context"
-import { useRecommendations } from "@/lib/recommendation-context"
 import { getNovelStatusBadgeClass } from "@/lib/novel-status"
 import { resolveBookshelfShelfStatus } from "@/lib/bookshelf-status"
 import { cn } from "@/lib/utils"
 
-type Tab = "dang-doc" | "danh-dau" | "da-doc" | "de-cu"
+type Tab = "dang-doc" | "da-doc"
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "dang-doc",  label: "Đang đọc",   icon: <BookOpen className="h-4 w-4" /> },
-  { id: "danh-dau",  label: "Đánh dấu",   icon: <BookMarked className="h-4 w-4" /> },
-  { id: "da-doc",    label: "Đã đọc",     icon: <CheckCircle2 className="h-4 w-4" /> },
-  { id: "de-cu",     label: "Đề cử",      icon: <Star className="h-4 w-4" /> },
+  { id: "dang-doc", label: "Đang đọc", icon: <BookOpen className="h-4 w-4" /> },
+  { id: "da-doc", label: "Đã đọc", icon: <CheckCircle2 className="h-4 w-4" /> },
 ]
 
 function NovelRow({
@@ -27,8 +24,7 @@ function NovelRow({
   authorName,
   status,
   extra,
-  readLink,
-  readLabel,
+  action,
   onRemove,
   removeLabel,
 }: {
@@ -38,8 +34,7 @@ function NovelRow({
   authorName: string
   status: string
   extra?: React.ReactNode
-  readLink: string
-  readLabel: string
+  action: React.ReactNode
   onRemove: () => void
   removeLabel: string
 }) {
@@ -67,9 +62,7 @@ function NovelRow({
         {extra}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <Button size="sm" asChild>
-          <Link href={readLink}>{readLabel}</Link>
-        </Button>
+        {action}
         <Button
           variant="ghost"
           size="icon"
@@ -95,14 +88,13 @@ function EmptyState({ message }: { message: string }) {
 
 export default function BookshelfPage() {
   const { user } = useAuth()
-  const { bookmarks, toggleBookmark } = useBookmarks()
-  const { recommendations, toggleRecommendation } = useRecommendations()
+  const { bookmarks, removeBookmark } = useBookmarks()
   const [activeTab, setActiveTab] = useState<Tab>("dang-doc")
 
   if (!user) {
     return (
       <div className="flex min-h-[calc(100svh-8rem)] flex-col items-center justify-center px-4 text-center">
-        <BookMarked className="mb-4 h-12 w-12 text-muted-foreground/40" />
+        <BookOpen className="mb-4 h-12 w-12 text-muted-foreground/40" />
         <h1 className="text-xl font-bold text-foreground">Tủ Sách</h1>
         <p className="mt-2 text-sm text-muted-foreground">Đăng nhập để xem danh sách truyện đã lưu</p>
         <Button className="mt-4" asChild>
@@ -117,17 +109,13 @@ export default function BookshelfPage() {
   const dangDocList = withNovel.filter(
     ({ bookmark, novel }) => resolveBookshelfShelfStatus(bookmark, novel) === "reading",
   )
-  const daDanhDauList = withNovel
   const daDocList = withNovel.filter(
     ({ bookmark, novel }) => resolveBookshelfShelfStatus(bookmark, novel) === "completed",
   )
-  const deCuList     = recommendations.filter((r) => r.novel)
 
   const counts: Record<Tab, number> = {
     "dang-doc": dangDocList.length,
-    "danh-dau": daDanhDauList.length,
-    "da-doc":   daDocList.length,
-    "de-cu":    deCuList.length,
+    "da-doc": daDocList.length,
   }
 
   return (
@@ -135,7 +123,6 @@ export default function BookshelfPage() {
       <h1 className="mb-6 text-2xl font-bold text-foreground">Tủ Sách</h1>
 
       <div className="flex gap-6">
-        {/* Sidebar */}
         <aside className="hidden w-44 shrink-0 sm:block">
           <nav className="flex flex-col gap-1">
             {TABS.map((tab) => (
@@ -146,16 +133,18 @@ export default function BookshelfPage() {
                   "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-left",
                   activeTab === tab.id
                     ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
                 {tab.icon}
                 <span className="flex-1">{tab.label}</span>
                 {counts[tab.id] > 0 && (
-                  <span className={cn(
-                    "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
-                    activeTab === tab.id ? "bg-primary/20 text-primary" : "bg-muted-foreground/20 text-muted-foreground"
-                  )}>
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                      activeTab === tab.id ? "bg-primary/20 text-primary" : "bg-muted-foreground/20 text-muted-foreground",
+                    )}
+                  >
                     {counts[tab.id]}
                   </span>
                 )}
@@ -164,7 +153,6 @@ export default function BookshelfPage() {
           </nav>
         </aside>
 
-        {/* Mobile tab bar */}
         <div className="mb-4 flex w-full gap-1 sm:hidden">
           {TABS.map((tab) => (
             <button
@@ -172,9 +160,7 @@ export default function BookshelfPage() {
               onClick={() => setActiveTab(tab.id)}
               className={cn(
                 "flex flex-1 flex-col items-center gap-1 rounded-lg px-2 py-2 text-[11px] font-medium transition-colors",
-                activeTab === tab.id
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-muted"
+                activeTab === tab.id ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted",
               )}
             >
               {tab.icon}
@@ -183,10 +169,9 @@ export default function BookshelfPage() {
           ))}
         </div>
 
-        {/* Content */}
         <div className="min-w-0 flex-1">
-          {activeTab === "dang-doc" && (
-            dangDocList.length === 0 ? (
+          {activeTab === "dang-doc" &&
+            (dangDocList.length === 0 ? (
               <EmptyState message="Bạn chưa bắt đầu đọc truyện nào." />
             ) : (
               <div className="flex flex-col gap-3">
@@ -198,58 +183,25 @@ export default function BookshelfPage() {
                     slug={novel.slug}
                     authorName={novel.authorName}
                     status={novel.status}
-                    readLink={`/truyen/${novel.slug}/${bookmark.lastChapterNumber}`}
-                    readLabel="Đọc tiếp"
+                    action={
+                      <Button size="sm" asChild>
+                        <Link href={`/truyen/${novel.slug}/${bookmark.lastChapterNumber}`}>Đọc tiếp</Link>
+                      </Button>
+                    }
                     extra={
                       <p className="text-xs text-muted-foreground">
                         Chương {bookmark.lastChapterNumber} / {novel.totalChapters}
                       </p>
                     }
-                    onRemove={() => toggleBookmark(novel.id)}
+                    onRemove={() => void removeBookmark(novel.id)}
                     removeLabel="Xóa khỏi tủ sách"
                   />
                 ))}
               </div>
-            )
-          )}
+            ))}
 
-          {activeTab === "danh-dau" && (
-            daDanhDauList.length === 0 ? (
-              <EmptyState message="Bạn chưa đánh dấu truyện nào." />
-            ) : (
-              <div className="flex flex-col gap-3">
-                {daDanhDauList.map(({ novel, bookmark }) => {
-                  const readLink = bookmark.lastChapterNumber
-                    ? `/truyen/${novel.slug}/${bookmark.lastChapterNumber}`
-                    : `/truyen/${novel.slug}/1`
-                  return (
-                    <NovelRow
-                      key={novel.id}
-                      coverUrl={novel.coverUrl}
-                      title={novel.title}
-                      slug={novel.slug}
-                      authorName={novel.authorName}
-                      status={novel.status}
-                      readLink={readLink}
-                      readLabel={bookmark.lastChapterNumber ? "Đọc tiếp" : "Đọc"}
-                      extra={
-                        bookmark.lastChapterNumber ? (
-                          <p className="text-xs text-muted-foreground">
-                            Chương {bookmark.lastChapterNumber} / {novel.totalChapters}
-                          </p>
-                        ) : undefined
-                      }
-                      onRemove={() => toggleBookmark(novel.id)}
-                      removeLabel="Xóa khỏi tủ sách"
-                    />
-                  )
-                })}
-              </div>
-            )
-          )}
-
-          {activeTab === "da-doc" && (
-            daDocList.length === 0 ? (
+          {activeTab === "da-doc" &&
+            (daDocList.length === 0 ? (
               <EmptyState message="Bạn chưa hoàn thành truyện nào." />
             ) : (
               <div className="flex flex-col gap-3">
@@ -261,43 +213,22 @@ export default function BookshelfPage() {
                     slug={novel.slug}
                     authorName={novel.authorName}
                     status={novel.status}
-                    readLink={`/truyen/${novel.slug}/${bookmark.lastChapterNumber}`}
-                    readLabel="Đọc lại"
+                    action={
+                      <Button size="sm" disabled className="cursor-default">
+                        Đã đọc
+                      </Button>
+                    }
                     extra={
                       <p className="text-xs text-muted-foreground">
-                        Đã đọc {novel.totalChapters} chương
+                        {bookmark.markedAsRead ? "Đánh dấu đã đọc" : `Đã đọc hết ${novel.totalChapters} chương`}
                       </p>
                     }
-                    onRemove={() => toggleBookmark(novel.id)}
+                    onRemove={() => void removeBookmark(novel.id)}
                     removeLabel="Xóa khỏi tủ sách"
                   />
                 ))}
               </div>
-            )
-          )}
-
-          {activeTab === "de-cu" && (
-            deCuList.length === 0 ? (
-              <EmptyState message="Bạn chưa đề cử truyện nào." />
-            ) : (
-              <div className="flex flex-col gap-3">
-                {deCuList.map((item) => (
-                  <NovelRow
-                    key={item.id}
-                    coverUrl={item.novel.coverUrl ?? undefined}
-                    title={item.novel.title}
-                    slug={item.novel.slug}
-                    authorName={item.novel.authorName}
-                    status={item.novel.status}
-                    readLink={`/truyen/${item.novel.slug}`}
-                    readLabel="Xem truyện"
-                    onRemove={() => void toggleRecommendation(item.novelId)}
-                    removeLabel="Bỏ đề cử"
-                  />
-                ))}
-              </div>
-            )
-          )}
+            ))}
         </div>
       </div>
     </div>

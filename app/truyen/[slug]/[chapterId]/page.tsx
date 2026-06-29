@@ -2,7 +2,6 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ChevronLeft, ChevronRight, List } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { CommentSection } from "@/components/comment-section"
 import { ReaderFAB } from "@/components/reader-fab"
 import { ChapterReaderProgress } from "./chapter-reader-progress"
 import { readerApiFetch, readerApiFetchNullable } from "@/lib/server-api"
@@ -29,17 +28,6 @@ type ChapterDetail = {
   maxChapter: number
 }
 
-type CommentsResponse = {
-  comments: Array<{
-    id: string
-    userId: string
-    username: string
-    content: string
-    chapterId?: string | null
-    createdAt: string | null
-  }>
-}
-
 export default async function ChapterReaderPage({ params }: { params: Promise<{ slug: string; chapterId: string }> }) {
   const { slug, chapterId } = await params
   const chapterNumber = parseInt(chapterId, 10)
@@ -57,21 +45,6 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
   if (!chapter) {
     notFound()
   }
-
-  const commentsData = await readerApiFetch<CommentsResponse>(
-    `/api/truyen/${encodeURIComponent(novel.id)}/comments?chapterId=${encodeURIComponent(chapter.id)}&page=1&limit=50`
-  )
-
-  const comments = commentsData.comments.map((comment) => ({
-    id: comment.id,
-    userId: comment.userId,
-    username: comment.username || "User",
-    avatarColor: "bg-primary",
-    novelId: novel.id,
-    chapterId: comment.chapterId || undefined,
-    content: comment.content,
-    createdAt: comment.createdAt ? comment.createdAt.split("T")[0] : "",
-  }))
 
   const hasPrev = Boolean(chapter.prevChapterNumber)
   const hasNext = Boolean(chapter.nextChapterNumber)
@@ -173,10 +146,6 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
       </div>
 
       <ChapterReaderProgress novelId={novel.id} chapterId={chapter.id} chapterNumber={chapter.number} />
-
-      <section className="border-t border-border pt-8">
-        <CommentSection comments={comments} novelId={novel.id} chapterId={chapter.id} />
-      </section>
 
       <ReaderFAB
         novelId={novel.id}

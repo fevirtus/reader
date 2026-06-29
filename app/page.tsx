@@ -1,8 +1,7 @@
 import Link from "next/link"
-import { ArrowRight, Clock3, Flame, MessageSquare, Shuffle, Trophy } from "lucide-react"
+import { ArrowRight, Clock3, Flame, Shuffle, Trophy } from "lucide-react"
 import { formatViews } from "@/lib/utils"
 import { HomeHotCarousel, type HotCarouselItem } from "@/components/home-hot-carousel"
-import { HomeRecommendationBoards } from "@/components/home-recommendation-boards"
 import { readerApiFetch } from "@/lib/server-api"
 
 export const dynamic = "force-dynamic"
@@ -21,56 +20,18 @@ type HomeNovel = {
   description: string
   bookmarkCount: number
   updatedAt: string | null
-}
-
-type EditorRecommendedItem = {
-  novel: {
-    id: string
-    slug: string
-    title: string
-    authorName: string
-    coverUrl: string | null
-    rating: number
-  }
-  editorName: string
-  recommendCount: number
-}
-
-type RecommendedByCountItem = {
-  novel: {
-    id: string
-    slug: string
-    title: string
-    authorName: string
-    coverUrl: string | null
-    rating: number
-  }
-  recommendCount: number
+  latestChapter?: {
+    number?: number | null
+    title?: string | null
+    createdAt?: string | null
+  } | null
 }
 
 type RankingEntry = {
   id: string
   novel: HomeNovel
-  aggregatedViews: number
-}
-
-type RecentCommentItem = {
-  id: string
-  content: string
-  createdAt: string | null
-  user: {
-    name: string | null
-  }
-  novel: {
-    slug: string
-    title: string
-  }
-}
-
-type LatestChapterInfo = {
-  chapterNumber: number | null
-  chapterTitle: string | null
-  chapterCreatedAt: string | null
+  metric: number
+  metricLabel: string
 }
 
 type BrowseResponse = {
@@ -121,26 +82,32 @@ function RankingBoard({
       </div>
 
       <div className="space-y-2">
-        {entries.length > 0 ? entries.map((entry, index) => (
-          <Link
-            key={entry.id}
-            href={`/truyen/${entry.novel.slug}`}
-            className="group flex items-center gap-3 rounded-lg border border-border/70 bg-background/70 p-2.5 transition hover:border-primary/40"
-          >
-            <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
-              {index + 1}
-            </span>
-            <img
-              src={entry.novel.coverUrl || "/default-cover.svg"}
-              alt={entry.novel.title}
-              className="h-12 w-9 shrink-0 rounded-md border border-border/70 object-cover"
-            />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">{entry.novel.title}</p>
-              <p className="text-xs text-muted-foreground">{formatViews(entry.aggregatedViews)} lượt đọc</p>
-            </div>
-          </Link>
-        )) : (
+        {entries.length > 0 ? (
+          entries.map((entry, index) => (
+            <Link
+              key={entry.id}
+              href={`/truyen/${entry.novel.slug}`}
+              className="group flex items-center gap-3 rounded-lg border border-border/70 bg-background/70 p-2.5 transition hover:border-primary/40"
+            >
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
+                {index + 1}
+              </span>
+              <img
+                src={entry.novel.coverUrl || "/default-cover.svg"}
+                alt={entry.novel.title}
+                className="h-12 w-9 shrink-0 rounded-md border border-border/70 object-cover"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground group-hover:text-primary">{entry.novel.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {entry.metricLabel === "rating"
+                    ? `${entry.metric.toFixed(1)}/10`
+                    : `${formatViews(entry.metric)} lượt đọc`}
+                </p>
+              </div>
+            </Link>
+          ))
+        ) : (
           <p className="text-sm text-muted-foreground">{emptyText}</p>
         )}
       </div>
@@ -151,23 +118,20 @@ function RankingBoard({
 export default async function HomePage() {
   let hotSlides: HotCarouselItem[] = []
   let randomNovels: HomeNovel[] = []
-  let recommendedByCountItems: RecommendedByCountItem[] = []
-  let editorRecommendedItems: EditorRecommendedItem[] = []
-  let latestNovels: Array<HomeNovel & { latestChapter?: { number?: number | null; title?: string | null; createdAt?: string | null } | null }> = []
-  let recentComments: RecentCommentItem[] = []
-  let weeklyRanking: RankingEntry[] = []
-  let monthlyRanking: RankingEntry[] = []
-  let allTimeRanking: RankingEntry[] = []
-  const latestChapterMap = new Map<string, LatestChapterInfo>()
+  let latestNovels: HomeNovel[] = []
+  let ratingRanking: RankingEntry[] = []
+  let viewsRanking: RankingEntry[] = []
 
   try {
-    const [popular, latest] = await Promise.all([
+    const [popular, latest, rating] = await Promise.all([
       readerApiFetch<BrowseResponse>("/api/novels/browse?sort=popular&page=1&limit=24"),
       readerApiFetch<BrowseResponse>("/api/novels/browse?sort=latest&page=1&limit=12"),
+      readerApiFetch<BrowseResponse>("/api/novels/browse?sort=rating&page=1&limit=10"),
     ])
 
     const popularItems = popular.items || []
     const latestItems = latest.items || []
+    const ratingItems = rating.items || []
 
     hotSlides = popularItems.slice(0, 10).map((novel) => ({
       id: novel.id,
@@ -185,18 +149,18 @@ export default async function HomePage() {
 
     randomNovels = [...popularItems].sort(() => Math.random() - 0.5).slice(0, 12)
     latestNovels = latestItems
-    recentComments = []
-    weeklyRanking = popularItems.slice(0, 5).map((novel) => ({ id: novel.id, novel, aggregatedViews: novel.views }))
-    monthlyRanking = popularItems.slice(5, 10).map((novel) => ({ id: novel.id, novel, aggregatedViews: novel.views }))
-    allTimeRanking = popularItems.slice(10, 15).map((novel) => ({ id: novel.id, novel, aggregatedViews: novel.views }))
-
-    for (const novel of latestNovels) {
-      latestChapterMap.set(novel.id, {
-        chapterNumber: null,
-        chapterTitle: null,
-        chapterCreatedAt: null,
-      })
-    }
+    ratingRanking = ratingItems.map((novel) => ({
+      id: novel.id,
+      novel,
+      metric: novel.rating,
+      metricLabel: "rating",
+    }))
+    viewsRanking = popularItems.slice(0, 10).map((novel) => ({
+      id: novel.id,
+      novel,
+      metric: novel.views,
+      metricLabel: "views",
+    }))
   } catch (error) {
     console.error("Failed to fetch data for homepage during build/runtime", error)
   }
@@ -210,7 +174,7 @@ export default async function HomePage() {
               <Flame className="h-6 w-6 text-primary" />
               Truyện hot hôm nay
             </h1>
-            <p className="text-sm text-muted-foreground">Mỗi lần trượt hiển thị 1 truyện, dữ liệu lấy từ log đọc theo tuần và tháng.</p>
+            <p className="text-sm text-muted-foreground">Truyện được đọc nhiều nhất hiện tại.</p>
           </div>
           <Link href="/tim-kiem?sort=popular" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
             Xem tất cả <ArrowRight className="h-3.5 w-3.5" />
@@ -226,65 +190,78 @@ export default async function HomePage() {
 
       <section>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="inline-flex items-center gap-2 text-xl font-bold text-foreground"><Shuffle className="h-5 w-5 text-primary" />Truyện ngẫu nhiên</h2>
+          <h2 className="inline-flex items-center gap-2 text-xl font-bold text-foreground">
+            <Shuffle className="h-5 w-5 text-primary" />
+            Truyện ngẫu nhiên
+          </h2>
           <span className="text-xs text-muted-foreground">Luôn cố gắng lấp đầy đủ 2 hàng</span>
         </div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          {randomNovels.length > 0 ? randomNovels.map((novel) => (
-            <Link
-              key={novel.id}
-              href={`/truyen/${novel.slug}`}
-              className="group overflow-hidden rounded-xl border border-border/70 bg-card transition hover:border-primary/40"
-            >
-              <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted/50">
-                <img
-                  src={novel.coverUrl || "/default-cover.svg"}
-                  alt={novel.title}
-                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                />
-              </div>
-              <div className="space-y-1 p-3">
-                <h3 className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary">{novel.title}</h3>
-                <p className="truncate text-xs text-muted-foreground">{novel.authorName}</p>
-                <p className="text-[11px] text-muted-foreground">{formatViews(novel.views)} lượt đọc</p>
-              </div>
-            </Link>
-          )) : (
+          {randomNovels.length > 0 ? (
+            randomNovels.map((novel) => (
+              <Link
+                key={novel.id}
+                href={`/truyen/${novel.slug}`}
+                className="group overflow-hidden rounded-xl border border-border/70 bg-card transition hover:border-primary/40"
+              >
+                <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted/50">
+                  <img
+                    src={novel.coverUrl || "/default-cover.svg"}
+                    alt={novel.title}
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  />
+                </div>
+                <div className="space-y-1 p-3">
+                  <h3 className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary">{novel.title}</h3>
+                  <p className="truncate text-xs text-muted-foreground">{novel.authorName}</p>
+                  <p className="text-[11px] text-muted-foreground">{formatViews(novel.views)} lượt đọc</p>
+                </div>
+              </Link>
+            ))
+          ) : (
             <p className="col-span-full text-sm text-muted-foreground">Không có truyện để hiển thị.</p>
           )}
         </div>
       </section>
 
-      <HomeRecommendationBoards topItems={recommendedByCountItems} editorItems={editorRecommendedItems} pageSize={5} />
-
       <section>
         <div className="mb-4">
-          <h2 className="text-xl font-bold text-foreground">Bảng xếp hạng độ hot</h2>
-          <p className="text-sm text-muted-foreground">So sánh độ nóng theo tuần, tháng và toàn thời gian.</p>
+          <h2 className="text-xl font-bold text-foreground">Bảng xếp hạng</h2>
+          <p className="text-sm text-muted-foreground">Xếp hạng theo đánh giá và lượt đọc.</p>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <RankingBoard title="Hot theo tuần" entries={weeklyRanking} emptyText="Tuần này chưa có dữ liệu nổi bật." />
-          <RankingBoard title="Hot theo tháng" entries={monthlyRanking} emptyText="Tháng này chưa có dữ liệu nổi bật." />
-          <RankingBoard title="Hot toàn thời gian" entries={allTimeRanking} emptyText="Chưa có dữ liệu toàn thời gian." />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <RankingBoard title="Xếp hạng đánh giá" entries={ratingRanking} emptyText="Chưa có dữ liệu đánh giá." />
+          <RankingBoard title="Xếp hạng lượt đọc" entries={viewsRanking} emptyText="Chưa có dữ liệu lượt đọc." />
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="inline-flex items-center gap-2 text-xl font-bold text-foreground"><Clock3 className="h-5 w-5 text-primary" />Truyện mới cập nhật</h2>
-            <Link href="/tim-kiem?sort=latest" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
-              Xem tất cả <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
+      <section className="rounded-2xl border border-border/70 bg-card/70 p-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="inline-flex items-center gap-2 text-xl font-bold text-foreground">
+            <Clock3 className="h-5 w-5 text-primary" />
+            Truyện mới cập nhật
+          </h2>
+          <Link href="/tim-kiem?sort=latest" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+            Xem tất cả <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
 
-          <div className="space-y-2">
-            {latestNovels.length > 0 ? latestNovels.map((novel) => {
-              const chapter = latestChapterMap.get(novel.id)
-              const chapterLabel = chapter?.chapterNumber ? `Chương ${chapter.chapterNumber}` : "Chưa có chương"
-              const chapterTitle = chapter?.chapterTitle ? compactLine(chapter.chapterTitle, 100) : "Đang cập nhật nội dung chương"
-              const updatedTime = formatRelativeTime(chapter?.chapterCreatedAt || novel.updatedAt)
+        <div className="space-y-2">
+          {latestNovels.length > 0 ? (
+            latestNovels.map((novel) => {
+              const chapter = novel.latestChapter
+              const chapterLabel = chapter?.number
+                ? `Chương ${chapter.number}`
+                : novel.totalChapters > 0
+                  ? `${novel.totalChapters} chương`
+                  : "Chưa có chương"
+              const chapterTitle = chapter?.title
+                ? compactLine(chapter.title, 100)
+                : novel.totalChapters > 0
+                  ? `Tổng ${novel.totalChapters} chương`
+                  : "Đang cập nhật nội dung chương"
+              const updatedTime = formatRelativeTime(chapter?.createdAt || novel.updatedAt)
 
               return (
                 <Link
@@ -306,34 +283,11 @@ export default async function HomePage() {
                   <div className="text-right text-[11px] text-muted-foreground">{updatedTime}</div>
                 </Link>
               )
-            }) : (
-              <p className="text-sm text-muted-foreground">Chưa có truyện mới cập nhật.</p>
-            )}
-          </div>
+            })
+          ) : (
+            <p className="text-sm text-muted-foreground">Chưa có truyện mới cập nhật.</p>
+          )}
         </div>
-
-        <aside className="rounded-2xl border border-border/70 bg-card/70 p-4">
-          <h2 className="mb-4 inline-flex items-center gap-2 text-xl font-bold text-foreground"><MessageSquare className="h-5 w-5 text-primary" />Bình luận mới</h2>
-
-          <div className="space-y-2">
-            {recentComments.length > 0 ? recentComments.map((comment) => (
-              <Link
-                key={comment.id}
-                href={`/truyen/${comment.novel.slug}`}
-                className="group block rounded-lg border border-border bg-background/80 p-3 transition hover:border-primary/40"
-              >
-                <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span className="truncate">{comment.user.name || "Người dùng"}</span>
-                  <span>{formatRelativeTime(comment.createdAt)}</span>
-                </div>
-                <p className="truncate text-xs font-medium text-primary">{comment.novel.title}</p>
-                <p className="mt-1 line-clamp-2 text-sm text-foreground/90">{compactLine(comment.content, 120)}</p>
-              </Link>
-            )) : (
-              <p className="text-sm text-muted-foreground">Chưa có bình luận mới.</p>
-            )}
-          </div>
-        </aside>
       </section>
     </div>
   )

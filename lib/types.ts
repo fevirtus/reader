@@ -47,22 +47,12 @@ export interface User {
   createdAt: string
 }
 
-export interface Comment {
-  id: string
-  userId: string
-  username: string
-  avatarColor: string
-  novelId: string
-  chapterId?: string
-  content: string
-  createdAt: string
-}
-
 export interface Bookmark {
   novelId: string
   lastChapterId?: string
   lastChapterNumber?: number
   readChapters?: number[]
+  markedAsRead?: boolean
   shelfStatus?: "reading" | "completed" | "saved"
   addedAt: string
   novel?: any

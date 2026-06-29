@@ -3,6 +3,7 @@ export type BookshelfShelfStatus = "reading" | "completed" | "saved"
 export interface BookshelfBookmarkLike {
   lastChapterNumber?: number | null
   readChapters?: number[]
+  markedAsRead?: boolean
   shelfStatus?: BookshelfShelfStatus | string | null
 }
 
@@ -19,6 +20,10 @@ export function resolveBookshelfShelfStatus(
     return explicit
   }
 
+  if (bookmark.markedAsRead) {
+    return "completed"
+  }
+
   const lastChapterNumber = bookmark.lastChapterNumber ?? null
   const readChapters = bookmark.readChapters ?? []
   const totalChapters = Number(novel?.totalChapters ?? 0)
@@ -31,4 +36,11 @@ export function resolveBookshelfShelfStatus(
     return "reading"
   }
   return "saved"
+}
+
+export function isBookshelfCompleted(
+  bookmark: BookshelfBookmarkLike,
+  novel?: BookshelfNovelLike | null,
+): boolean {
+  return resolveBookshelfShelfStatus(bookmark, novel) === "completed"
 }

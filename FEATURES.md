@@ -6,29 +6,32 @@ Trang thai tinh nang cho web app `reader`.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Home boards / browse | done | Goi API browse, hot/recommendation sections |
+| Home boards / browse | done | Hot carousel, xep hang danh gia/luot doc, truyen moi cap nhat |
 | Genre listing/detail | done | `/api/genres`, `/api/novels/browse` |
 | Search + suggest | partial | Suggest da co web, can tiep tuc canh edge cases |
-| Novel detail + chapter list | done | Chi tiet + comment/thread load |
+| Novel detail + chapter list | done | Chi tiet + rating interactive |
 
 ## User
 
 | Feature | Status | Notes |
 |---|---|---|
 | Google login (NextAuth) | done | Session cookie auth |
-| Bookmark CRUD | done | Qua `/api/user/bookmarks` |
+| Bookshelf (dang doc / da doc) | done | 2 tab; khong con kệ danh dau |
+| Mark as read | done | `POST /api/user/bookmarks` action `markAsRead` |
 | Reading progress sync | partial | Co call API, can them parity checks |
 | Reading settings | done | `/api/user/settings` |
-| Comment on novel/chapter | done | `/api/truyen/{id}/comments` |
-| Rating | done | `/api/truyen/{id}/rate` |
-| Recommendations | done | `/api/user/recommendations` |
+| Rating | done | `/api/truyen/{id}/rate` thang 1-10 |
 
 ## MOD/ADMIN
 
 | Feature | Status | Notes |
 |---|---|---|
-| MOD dashboard/workflows | partial | Mot phan route mod da co, tiep tuc bo sung |
-| EPUB import wizard | done | `/mod/import`: `/api/mod/the-loai`, `POST /api/import/uploads/preview`, `/api/mod/epub`, `/api/mod/epub/ai-suggest` |
+| MOD dashboard/workflows | partial | Mot phan route mod da co |
+| EPUB import wizard | done | `/mod/import` |
+
+## Da loai bo
+
+- Comment, de cu (user/editor), admin truyen thieu du lieu, quan ly de cu
 
 ## Dependencies
 

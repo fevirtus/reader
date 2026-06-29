@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { AlertTriangle, BookOpen, Home, Star, Tag, ChevronLeft, ChevronRight, UploadCloud } from "lucide-react"
+import { BookOpen, Home, Tag, ChevronLeft, ChevronRight, UploadCloud } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function CollapsibleSidebar() {
@@ -30,10 +30,8 @@ export function CollapsibleSidebar() {
     const navItems = [
         { href: "/mod", label: "Tổng quan", icon: Home },
         { href: "/mod/truyen", label: "Quản lý truyện", icon: BookOpen },
-        { href: "/mod/thieu-thong-tin", label: "Truyện thiếu dữ liệu", icon: AlertTriangle },
         { href: "/mod/the-loai", label: "Quản lý thể loại", icon: Tag },
         { href: "/mod/import", label: "Import EPUB", icon: UploadCloud },
-        { href: "/mod/de-cu", label: "Quản lý đề cử", icon: Star },
     ]
 
     return (
