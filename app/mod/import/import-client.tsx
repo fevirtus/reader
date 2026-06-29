@@ -73,6 +73,7 @@ export function ImportClient() {
 
   const [aiLoading, setAiLoading] = useState(false)
   const [aiModel, setAiModel] = useState("")
+  const [aiModelTier, setAiModelTier] = useState("")
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
 
@@ -266,6 +267,7 @@ export function ImportClient() {
       if (!res.ok) throw new Error(data?.detail || "AI suggest failed")
       const suggestedGenres: string[] = (data?.suggestedGenres || []).slice(0, 6)
       setAiModel(String(data?.model || data?.source || ""))
+      setAiModelTier(String(data?.modelTier || ""))
       setGenreQuery("")
       if (suggestedGenres.length > 0) {
         const ensuredIds = await ensureGenreIdsByNames(suggestedGenres)
@@ -534,7 +536,12 @@ export function ImportClient() {
             <Button variant="outline" onClick={onAiSuggest} disabled={aiLoading}>{aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} AI gợi ý</Button>
             <Button onClick={onSaveReview}>Lưu & sang bước 3</Button>
           </div>
-          {aiModel && <p className="text-xs text-muted-foreground">AI model: {aiModel}</p>}
+          {aiModel && (
+            <p className="text-xs text-muted-foreground">
+              AI model: {aiModel}
+              {aiModelTier ? ` (${aiModelTier})` : ""}
+            </p>
+          )}
         </section>
       )}
 
