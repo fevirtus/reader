@@ -28,6 +28,7 @@ type NovelDetail = {
   views: number
   rating: number
   ratingCount: number
+  userRating?: number | null
   bookmarkCount: number
   genres: NovelGenre[]
 }
@@ -157,7 +158,13 @@ export default async function NovelDetailPage({
           </div>
 
           <div className="mt-2">
-            <StarRating rating={novel.rating} ratingCount={novel.ratingCount} interactive novelId={novel.id} />
+            <StarRating
+              rating={novel.rating}
+              ratingCount={novel.ratingCount}
+              userRating={novel.userRating}
+              interactive
+              novelId={novel.id}
+            />
           </div>
 
           <div className="flex items-center gap-6 mt-4 md:gap-8 overflow-hidden">

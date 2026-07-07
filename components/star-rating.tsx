@@ -1,11 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Star } from "lucide-react"
 
 interface StarRatingProps {
   rating: number
   ratingCount: number
+  userRating?: number | null
   interactive?: boolean
   novelId?: string
   onRate?: (value: number) => void
@@ -23,17 +24,46 @@ function starFillValue(starIndex: number, displayRating: number): number {
 export function StarRating({
   rating: initialRating,
   ratingCount: initialCount,
+  userRating: initialUserRating = null,
   interactive = false,
   novelId,
   onRate,
 }: StarRatingProps) {
   const [hoverScore, setHoverScore] = useState(0)
-  const [selectedScore, setSelectedScore] = useState(0)
-  const [currentRating, setCurrentRating] = useState(initialRating)
-  const [currentCount, setCurrentCount] = useState(initialCount)
+  const [userRating, setUserRating] = useState<number | null>(initialUserRating)
+  const [averageRating, setAverageRating] = useState(initialRating)
+  const [ratingCount, setRatingCount] = useState(initialCount)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const displayRating = hoverScore || selectedScore || currentRating
+  useEffect(() => {
+    setAverageRating(initialRating)
+    setRatingCount(initialCount)
+    setUserRating(initialUserRating)
+  }, [initialRating, initialCount, initialUserRating])
+
+  useEffect(() => {
+    if (!interactive || !novelId || initialUserRating != null) return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/truyen/${novelId}/rate`)
+        if (!res.ok) return
+        const data = (await res.json()) as { userRating?: number | null }
+        if (!cancelled && typeof data.userRating === "number") {
+          setUserRating(data.userRating)
+        }
+      } catch (error) {
+        console.error("Failed to load user rating", error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [interactive, novelId, initialUserRating])
+
+  const displayRating = hoverScore || userRating || 0
 
   const resolveScoreFromEvent = (star: number, event: React.MouseEvent<HTMLButtonElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -44,10 +74,9 @@ export function StarRating({
   const handleRate = async (score: number) => {
     if (!interactive || isSubmitting) return
 
-    setSelectedScore(score)
-
     if (onRate) {
       onRate(score)
+      setUserRating(score)
       return
     }
 
@@ -62,8 +91,13 @@ export function StarRating({
 
         if (res.ok) {
           const data = await res.json()
-          setCurrentRating(data.rating)
-          setCurrentCount(data.ratingCount)
+          setAverageRating(data.rating)
+          setRatingCount(data.ratingCount)
+          if (typeof data.userRating === "number") {
+            setUserRating(data.userRating)
+          } else {
+            setUserRating(score)
+          }
         }
       } catch (error) {
         console.error("Failed to rate", error)
@@ -74,7 +108,7 @@ export function StarRating({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <div className="flex items-center gap-0.5">
         {Array.from({ length: STAR_COUNT }, (_, index) => {
           const star = index + 1
@@ -102,8 +136,12 @@ export function StarRating({
           )
         })}
       </div>
-      <span className="text-sm font-semibold text-foreground">{currentRating.toFixed(1)}/10</span>
-      <span className="text-xs text-muted-foreground">({currentCount} đánh giá)</span>
+      {userRating != null && (
+        <span className="text-sm font-semibold text-foreground">Bạn: {userRating.toFixed(1)}/10</span>
+      )}
+      <span className="text-sm text-muted-foreground">
+        TB: {averageRating.toFixed(1)}/10 ({ratingCount} người)
+      </span>
     </div>
   )
 }

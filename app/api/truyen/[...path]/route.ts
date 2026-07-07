@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -10,6 +11,8 @@ async function proxy(req: NextRequest, path: string[]) {
     return NextResponse.json({ error: "Missing READER_API_ORIGIN" }, { status: 500 })
   }
 
+  const accessToken = req.cookies.get(AUTH_COOKIE_NAME)?.value || null
+
   const url = new URL(req.url)
   const query = url.search || ""
   const targetUrl = `${readerApiOrigin}/api/truyen/${path.join("/")}${query}`
@@ -17,6 +20,9 @@ async function proxy(req: NextRequest, path: string[]) {
   const headers = new Headers(req.headers)
   headers.delete("host")
   headers.delete("cookie")
+  if (accessToken) {
+    headers.set("authorization", `Bearer ${accessToken}`)
+  }
 
   const isBodyMethod = req.method !== "GET" && req.method !== "HEAD"
   const upstream = await fetch(targetUrl, {
