@@ -19,7 +19,7 @@ type ChapterDetail = {
   novelId: string
   number: number
   title: string
-  content: string
+  content: string | null
   volumeNumber?: number | null
   volumeTitle?: string | null
   volumeChapterNumber?: number | null
@@ -48,7 +48,10 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
 
   const hasPrev = Boolean(chapter.prevChapterNumber)
   const hasNext = Boolean(chapter.nextChapterNumber)
-  const paragraphs = chapter.content.split("\n").map((p: string) => p.trim()).filter(Boolean)
+  const paragraphs = (chapter.content ?? "")
+    .split("\n")
+    .map((p: string) => p.trim())
+    .filter(Boolean)
   const chapterLabel = chapter.volumeChapterNumber ? `Chương ${chapter.volumeChapterNumber}` : `Chương ${chapter.number}`
   const volumeLabel = chapter.volumeTitle || (chapter.volumeNumber ? `Quyển ${chapter.volumeNumber}` : null)
 
@@ -105,11 +108,15 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
       </div>
 
       <article className="chapter-content mb-8 rounded-lg border border-border bg-card p-4 font-serif text-foreground/90 text-justify md:p-8 lg:p-12">
-        {paragraphs.map((text: string, idx: number) => (
-          <p key={idx} data-p-index={idx} className="mb-4 last:mb-0">
-            {text}
-          </p>
-        ))}
+        {paragraphs.length > 0 ? (
+          paragraphs.map((text: string, idx: number) => (
+            <p key={idx} data-p-index={idx} className="mb-4 last:mb-0">
+              {text}
+            </p>
+          ))
+        ) : (
+          <p className="text-muted-foreground not-italic">Nội dung chương chưa có sẵn.</p>
+        )}
       </article>
 
       <div className="mb-8 flex items-center justify-between gap-2">
