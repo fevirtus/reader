@@ -1,180 +1,90 @@
-# Reader Project
+# Reader — Web
 
-Đây là dự án nền tảng đọc truyện (Web Application) được xây dựng với kiến trúc hiện đại; dữ liệu cấu trúc và metadata người dùng lưu trên PostgreSQL (Prisma), nội dung chương và file quản lý qua API backend (`reader-api`).
+Ứng dụng đọc truyện trên web và giao diện quản lý nội dung của bộ Reader.
 
-## 🚀 Tính năng nổi bật
+- `reader`: giao diện Next.js cho người đọc và MOD/ADMIN.
+- `reader-api`: backend chung, xử lý nghiệp vụ, xác thực và lưu trữ.
+- `reader-app`: ứng dụng Flutter cho người đọc.
 
-- **Xác thực & Phân quyền**: Đăng nhập bằng Google Authentication (NextAuth). Hỗ trợ phân quyền người dùng (USER, MOD, ADMIN).
-- **Quản lý nội dung (Dành cho MOD/ADMIN)**: Dashboard quản lý truyện, tải lên chương mới, quản lý trạng thái truyện (Đang ra, Hoàn thành, Tạm ngưng).
-- **Trải nghiệm đọc**: Khám phá truyện theo thể loại, tìm kiếm truyện, đọc chương qua API backend.
-- **Tương tác người dùng**: Tính năng tủ sách (bookmark) giúp lưu lại tiến độ đọc, hỗ trợ bình luận ở truyện và từng chương.
+## Phạm vi hiện tại
 
-## 🛠 Tech Stack
+Người đọc có thể duyệt/tìm truyện, xem thể loại và bảng xếp hạng, đọc chương,
+đánh giá truyện, quản lý tủ sách đang đọc/đã đọc và lưu thiết lập đọc.
+Tiến độ được gửi qua thao tác `updateProgress` của API bookmarks.
+Bình luận và đề cử không còn trong phạm vi hiện tại.
 
-- **Framework**: [Next.js](https://nextjs.org/) (App Router), React 19
-- **Styling**: [TailwindCSS v4](https://tailwindcss.com/) & [Radix UI](https://www.radix-ui.com/) (shadcn/ui)
-- **Database**:
-  - **PostgreSQL**: Metadata và dữ liệu người dùng trên web (Prisma). Nội dung chương và file do **reader-api** phục vụ (NAS/R2 tùy cấu hình backend).
-- **Auth**: [NextAuth.js](https://next-auth.js.org/)
+MOD/ADMIN có giao diện quản lý truyện, chương, thể loại, ảnh bìa và import EPUB.
+Import hỗ trợ preview, gợi ý metadata bằng AI, chỉnh cách tách chương và áp dụng
+kết quả; có cả giao diện import từng file và theo lô.
 
----
+## Kiến trúc và xác thực
 
-## 💻 Hướng dẫn chạy Local (Phát triển)
+- `app/`: trang, server rendering và route handlers.
+- `components/`: giao diện dùng chung.
+- `lib/server-api.ts`, `lib/server-auth.ts`: gọi backend từ server.
+- `next.config.mjs` và `app/api/`: rewrite/proxy tới `READER_API_ORIGIN`.
 
-### 1. Yêu cầu cài đặt
-- [Node.js](https://nodejs.org/) (Khuyến nghị bản LTS)
-- [pnpm](https://pnpm.io/) (Tool quản lý package)
-- Database: PostgreSQL (local hoặc máy chủ). Backend `reader-api` dùng chung hoặc riêng tùy triển khai.
+Google ID token được gửi tới `/api/auth/login` của web; route này gọi
+`POST /api/auth/mobile-login` trên backend và lưu access token vào cookie
+HttpOnly `reader_access_token`. `/api/auth/session` lấy thông tin user từ backend;
+`/api/auth/logout` xóa cookie. Route NextAuth cũ trả `410`.
 
-### 2. Cấu hình môi trường
-Tạo file `.env` ở thư mục gốc dựa trên `.env.example` (nếu có) hoặc điền các thông tin sau:
+Nghiệp vụ và truy cập dữ liệu của các luồng hiện tại đi qua API. Repo vẫn giữ
+Prisma schema, migrations và dependency cũ; chúng không có nghĩa web sở hữu
+một database riêng. Không cần chạy `prisma db push` để khởi động web với backend
+đã được chuẩn bị.
 
-```env
-# URL kết nối PostgreSQL
-DATABASE_URL="postgresql://user:password@localhost:5432/reader?schema=public"
+## Chạy local
 
-# Cấu hình NextAuth
-NEXTAUTH_SECRET="your-super-secret-key"
-NEXTAUTH_URL="http://localhost:3000"
+Cần Node.js, pnpm và backend đang chạy. Dockerfile hiện dùng Node 22.
+Tạo `.env` với:
 
-# API backend dùng chung cho web + mobile
-READER_API_ORIGIN="http://localhost:8000"
-
-# Cấu hình Google Login
-GOOGLE_CLIENT_ID="your_google_client_id"
-GOOGLE_CLIENT_SECRET="your_google_client_secret"
-
-# Cloudflare R2 (lưu ảnh bìa)
-R2_ACCOUNT_ID="your_cloudflare_account_id"
-R2_ACCESS_KEY_ID="your_r2_access_key_id"
-R2_SECRET_ACCESS_KEY="your_r2_secret_access_key"
-R2_BUCKET_NAME="your_r2_bucket_name"
-R2_PUBLIC_BASE_URL="https://your-public-r2-domain"
+```dotenv
+READER_API_ORIGIN=http://localhost:8000
+GOOGLE_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
 ```
 
-### 3. Cài đặt dependencies và khởi tạo DB
+Client ID này phải nằm trong danh sách cho phép của backend. Endpoint cấu hình
+web ưu tiên `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, rồi `WEB_GOOGLE_CLIENT_ID`, rồi
+`GOOGLE_CLIENT_ID`; tránh để giá trị cũ ở biến có mức ưu tiên cao hơn.
+Luồng đăng nhập hiện tại không dùng Google client secret trên web.
 
 ```bash
-# Cài đặt các gói thư viện
 pnpm install
-
-# Đồng bộ schema xuống PostgreSQL và generate Prisma client
-npx prisma db push
-# hoặc (nếu muốn dùng migrate)
-# npx prisma migrate dev
-
-# Generate thư viện Prisma
-npx prisma generate
-```
-
-### 4. Chạy môi trường phát triển
-
-```bash
+pnpm exec prisma generate
 pnpm dev
 ```
-Truy cập vào [http://localhost:3000](http://localhost:3000) để xem ứng dụng.
 
-Lưu ý: traffic API user-facing và MOD đi qua `READER_API_ORIGIN` theo hai cách:
-
-- **Rewrites** trong `next.config.mjs`: `/api/genres`, `/api/novels/*`, `/api/chapters/*`, `/api/auth/mobile-login`, `/api/health`, `/api/dev/*`.
-- **Route handlers** proxy trong `app/api/*/route.ts`: `/api/truyen/*`, `/api/user/*`, `/api/mod/*`, và `POST /api/import/uploads/preview` (forward request kèm cookie/session).
-
-Một số chỗ server-side gọi API trực tiếp qua `lib/server-api.ts` / `lib/server-auth.ts` (không đi qua rewrite ở trên).
-
----
-
-## 🏗 Hướng dẫn Build
-
-Để build project cho môi trường production:
+Web chạy tại `http://localhost:3000`.
 
 ```bash
-# Đảm bảo Prisma Client đã được generate
-npx prisma generate
-
-# Chạy lệnh build của Next.js
+pnpm exec tsc --noEmit
 pnpm build
-```
-
-Sau khi build xong, bạn có thể khởi chạy server production bằng:
-```bash
 pnpm start
 ```
 
----
+`next.config.mjs` đang bật `typescript.ignoreBuildErrors`, nên build thành công
+không thay thế việc kiểm tra TypeScript riêng.
 
-## 🐳 Triển khai dưới dạng Docker
+## Docker
 
-Bạn có thể dễ dàng triển khai ứng dụng bằng nền tảng Docker. Dưới đây là cách đóng gói và chạy thông qua `docker-compose`.
+Dùng cấu hình chạy chung trong [reader-api](../reader-api/README.md).
+Cấu hình đó build web từ repo `../reader`, mở cổng 3000 và gọi API nội bộ qua
+`http://api:8000`. File `docker-compose.yml` trong repo web là cấu hình triển khai
+riêng với giá trị môi trường cố định và cổng 3003, không phải cấu hình local chung.
 
-### 1. Tạo file `Dockerfile`
-Tạo file `Dockerfile` ở thư mục gốc của dự án với cấu hình multi-stage build để tối ưu dung lượng:
+Container áp dụng `READER_API_ORIGIN` cho cả server fetch và proxy lúc khởi động,
+kể cả khi image được build với địa chỉ khác. Trong Kubernetes namespace `reader`,
+đặt `READER_API_ORIGIN=http://reader-api` (Service port 80). Địa chỉ này chỉ dành
+cho server web; ứng dụng mobile tiếp tục dùng URL HTTPS công khai của backend.
 
-```dockerfile
-# Stage 1: Dependencies
-FROM node:22-alpine AS deps
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN corepack enable pnpm && pnpm install --frozen-lockfile
+## Tài liệu dùng chung
 
-# Stage 2: Builder
-FROM node:22-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-# Tạo prisma client
-RUN npx prisma generate
-# Chạy build
-RUN corepack enable pnpm && pnpm build
+Các liên kết dưới đây giả định ba repo được checkout cạnh nhau:
 
-# Stage 3: Runner
-FROM node:22-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production
+- [Backend và lưu trữ](../reader-api/README.md)
+- [API contract hiện tại](../reader-api/CONTRACT.md)
+- [Đối chiếu tính năng web/mobile](../reader-api/CROSS_REPO_ENDPOINT_MATRIX.md)
 
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-
-EXPOSE 3000
-ENV PORT=3000
-
-CMD ["node", "server.js"]
-```
-*(Lưu ý: Để build mục `standalone` hoạt động, bạn cần bổ sung `output: 'standalone'` trong file `next.config.mjs`)*
-
-### 2. Tạo file `docker-compose.yml`
-Sử dụng Docker Compose để chạy ứng dụng (giả sử Database của bạn được host riêng hoặc bạn có thể thêm service DB vào file này):
-
-```yaml
-version: '3.8'
-
-services:
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: reader-web:latest
-    container_name: reader-app
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    restart: unless-stopped
-```
-
-### 3. Khởi chạy bằng Docker
-Chạy lệnh sau để build image và start container:
-
-```bash
-# Build và chạy ngầm (detached mode)
-docker-compose up -d --build
-```
-
-Để xem log của container:
-```bash
-docker-compose logs -f web
-```
-Dừng và xóa container:
-```bash
-docker-compose down
-```
+Khi đổi endpoint hoặc hành vi chung, cập nhật tài liệu tại backend và kiểm tra
+các client đang sử dụng. Không sao chép contract sang từng repo.
