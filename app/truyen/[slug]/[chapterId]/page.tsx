@@ -157,10 +157,7 @@ export default async function ChapterReaderPage({ params }: { params: Promise<{ 
       <ReaderFAB
         novelId={novel.id}
         novelSlug={slug}
-        paragraphs={paragraphs}
         currentChapter={chapterNumber}
-        maxChapter={chapter.maxChapter}
-        chapterTitle={`${volumeLabel ? `${volumeLabel} - ` : ""}${chapterLabel}: ${chapter.title}`}
       />
     </div>
   )

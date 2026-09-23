@@ -20,6 +20,7 @@ async function proxy(req: NextRequest, path: string[]) {
   const headers = new Headers(req.headers)
   headers.delete("host")
   headers.delete("cookie")
+  headers.set("accept-encoding", "identity")
   if (accessToken) {
     headers.set("authorization", `Bearer ${accessToken}`)
   }
@@ -38,9 +39,18 @@ async function proxy(req: NextRequest, path: string[]) {
     return NextResponse.json({ detail: "Không kết nối được dịch vụ Audio book" }, { status: 502 })
   }
 
+  // Node fetch decodes compressed responses. Forwarding the original encoding
+  // would make the browser decompress JSON a second time (e.g. via Cloudflare).
+  const responseHeaders = new Headers(upstream.headers)
+  if (responseHeaders.has("content-encoding")) {
+    responseHeaders.delete("content-encoding")
+    responseHeaders.delete("content-length")
+  }
+  responseHeaders.delete("transfer-encoding")
+  responseHeaders.delete("connection")
   return new NextResponse(upstream.body, {
     status: upstream.status,
-    headers: upstream.headers,
+    headers: responseHeaders,
   })
 }
 

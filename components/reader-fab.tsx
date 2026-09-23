@@ -6,23 +6,17 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { ReadingSettingsContent } from "./reading-settings"
-import { TTSPlayer } from "./tts-player"
+import Link from "next/link"
 import { ReaderTOC } from "./reader-toc"
 
 interface ReaderFABProps {
   novelId: string
   novelSlug: string
-  // TTS Props
-  paragraphs: string[]
   currentChapter: number
-  maxChapter: number
-  chapterTitle: string
 }
 
-export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxChapter, chapterTitle }: ReaderFABProps) {
+export function ReaderFAB({ novelId, novelSlug, currentChapter }: ReaderFABProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const [isTTSOpen, setIsTTSOpen] = useState(false)
-  const [isTTSExpanded, setIsTTSExpanded] = useState(false)
   const [showScrollTop, setShowScrollTop] = useState(false)
   const [isMobileControlsVisible, setIsMobileControlsVisible] = useState(true)
 
@@ -47,7 +41,7 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
 
       if (currentY < 120) {
         setIsMobileControlsVisible(true)
-      } else if (delta > 0 && !isOpen && !isTTSOpen) {
+      } else if (delta > 0 && !isOpen) {
         setIsMobileControlsVisible(false)
       } else if (delta < 0) {
         setIsMobileControlsVisible(true)
@@ -58,7 +52,7 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
 
     window.addEventListener("scroll", handleScroll, { passive: true })
     return () => window.removeEventListener("scroll", handleScroll)
-  }, [isOpen, isTTSOpen])
+  }, [isOpen])
 
   const handleScrollToTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" })
@@ -122,7 +116,7 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
     <>
       <div className={cn(
         "fixed right-3 z-50 flex flex-col items-center gap-2.5 transition-all duration-300 md:right-6 md:gap-3",
-        isTTSOpen ? (isTTSExpanded ? "bottom-[10.5rem] md:bottom-[12rem]" : "bottom-[4.75rem] md:bottom-24") : "bottom-3 md:bottom-6",
+        "bottom-3 md:bottom-6",
         isMobileControlsVisible ? "max-md:translate-y-0 max-md:opacity-100" : "max-md:translate-y-20 max-md:opacity-0 max-md:pointer-events-none"
       )}>
       {/* Main FAB Toggle (Mobile mostly, but works as container) */}
@@ -141,20 +135,8 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
           isOpen ? "scale-100 opacity-100" : "scale-0 opacity-0 pointer-events-none md:scale-100 md:opacity-100 md:pointer-events-auto"
         )}
       >
-        {/* TTS Toggle */}
-        <Button
-          variant={isTTSOpen ? "default" : "secondary"}
-          size="icon"
-          className="h-10 w-10 rounded-full shadow-md relative group md:h-12 md:w-12"
-          onClick={() => {
-            setIsTTSOpen(!isTTSOpen)
-            setIsOpen(false)
-          }}
-        >
-          <Headphones className="h-4 w-4 md:h-5 md:w-5" />
-          <span className="absolute right-full mr-3 hidden whitespace-nowrap rounded bg-foreground/90 px-2 py-1 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100 md:inline">
-            {isTTSOpen ? "Đóng Audio" : "Nghe Audio"}
-          </span>
+        <Button asChild variant="secondary" size="icon" className="h-10 w-10 rounded-full shadow-md md:h-12 md:w-12">
+          <Link href={`/audio-book/${novelId}?chapter=${currentChapter}`} aria-label="Nghe chương này bằng Audio book" title="Nghe Audio book"><Headphones className="h-5 w-5" /></Link>
         </Button>
 
         {/* TOC */}
@@ -218,18 +200,6 @@ export function ReaderFAB({ novelId, novelSlug, paragraphs, currentChapter, maxC
       }
     `}</style>
 
-    {/* Render the TTS Player connected to this FAB state */}
-    <TTSPlayer 
-      isOpen={isTTSOpen}
-      onClose={() => setIsTTSOpen(false)}
-      isExpanded={isTTSExpanded}
-      onExpandedChange={setIsTTSExpanded}
-      paragraphs={paragraphs}
-      novelSlug={novelSlug}
-      currentChapter={currentChapter}
-      maxChapter={maxChapter}
-      chapterTitle={chapterTitle}
-    />
     </>
   )
 }
