@@ -59,6 +59,9 @@ export function NovelDetailActions({
         </Button>
       )}
 
+      <Button variant="outline" asChild>
+        <Link href={`/audio-book/${encodeURIComponent(novelId)}`}>Audio book</Link>
+      </Button>
       {user && !completed ? (
         <Button
           variant="outline"
