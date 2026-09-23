@@ -3,11 +3,12 @@
 import { use, useCallback, useEffect, useRef, useState } from "react"
 import { Headphones, RefreshCw, Loader2, ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AudioBookVoicePicker, type AudioBookVoice } from "@/components/audio-book-voice-picker"
 import { useAuth } from "@/lib/auth-context"
 
 type Chapter = { id: string; number: number; title: string; assetId: string | null; url: string | null; duration: number; status: string; hasUpdate: boolean }
 type Edition = { id: string; novelId: string; title: string; voiceId: string; revision: string; readyCount: number; chapters: Chapter[]; export: { url: string; chapterCount: number; hasUpdate: boolean } | null }
-type Voice = { id: string; name: string; default: boolean }
+type Voice = AudioBookVoice
 type Progress = { userId?: string; editionId: string; assetId: string; position: number; eventId: string; occurredAt: string }
 
 async function api(path: string, body?: unknown) {
@@ -27,6 +28,7 @@ export default function AudioBookPage({ params }: { params: Promise<{ novelId: s
   const [voices, setVoices] = useState<Voice[]>([])
   const [editionId, setEditionId] = useState("")
   const [voice, setVoice] = useState("anh-khoi")
+  const [previewStopToken, setPreviewStopToken] = useState(0)
   const [active, setActive] = useState<{ edition: Edition; chapter: Chapter; position: number } | null>(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
@@ -118,7 +120,7 @@ export default function AudioBookPage({ params }: { params: Promise<{ novelId: s
     </div>
     {error && <p role="alert" className="my-4 rounded-lg border border-destructive p-3 text-sm">{error}</p>}
     <section className="my-6 flex flex-wrap items-end gap-3 rounded-xl border bg-muted/30 p-4">
-      <label className="flex flex-1 flex-col gap-2 text-sm font-medium">Giọng muốn nghe<select aria-label="Giọng muốn nghe" className="rounded-md border bg-background p-2.5" value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name}{v.default ? " · Mặc định" : ""}</option>)}</select></label>
+      <AudioBookVoicePicker voices={voices} selected={voice} onSelect={setVoice} stopToken={previewStopToken} onPreviewStart={() => { wantsPlayback.current = false; streamFailed.current = false; audio.current?.pause() }} />
       <Button disabled={requesting || !voices.length} onClick={async () => { setRequesting(true); try { const edition = await api(`novels/${novelId}/requests`, { voiceId: voice }); setEditionId(edition.id); await refresh() } catch(e) { setError((e as Error).message) } finally { setRequesting(false) } }}>{requesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Yêu cầu tạo Audio book</Button>
       <p className="w-full text-xs text-muted-foreground">Yêu cầu trùng sẽ được gộp. Chương hoàn tất có thể nghe ngay, không cần chờ cả truyện.</p>
     </section>
@@ -126,6 +128,6 @@ export default function AudioBookPage({ params }: { params: Promise<{ novelId: s
       <nav aria-label="Các bản giọng" className="mb-5 flex flex-wrap gap-2">{editions.map(e => <Button key={e.id} variant={selected?.id === e.id ? "default" : "outline"} onClick={() => setEditionId(e.id)}>{voices.find(v => v.id === e.voiceId)?.name || e.voiceId} · {e.readyCount}/{e.chapters.length}</Button>)}</nav>
       <ol className="divide-y rounded-xl border">{selected?.chapters.map(c => <li key={c.id}><button className="flex w-full items-center justify-between gap-4 p-4 text-left hover:bg-muted/50 disabled:cursor-default" disabled={!c.url} onClick={() => play(selected, c)}><span><span className="text-xs text-muted-foreground">Chương {c.number}</span><span className="block font-medium">{c.title || `Chương ${c.number}`}</span></span><span className="shrink-0 text-xs text-muted-foreground">{c.hasUpdate ? "Đang tạo bản cập nhật" : c.url ? "Nghe" : c.status === "rendering" ? "Đang tạo" : c.status === "failed" ? "Tạo thất bại" : "Đang chờ"}</span></button></li>)}</ol>
     </>}
-    {active && <section className="fixed inset-x-0 bottom-0 z-40 border-t bg-background p-4"><div className="mx-auto max-w-4xl"><p className="mb-2 truncate text-sm font-medium">Chương {active.chapter.number} · {active.chapter.title}</p><div className="flex items-center gap-3"><audio key={`${active.chapter.assetId}:${loadAttempt}`} ref={audio} controls controlsList="nodownload" autoPlay preload="metadata" className="min-w-0 flex-1" src={active.chapter.url!} onLoadedMetadata={() => { if (audio.current) { audio.current.currentTime = active.position; audio.current.playbackRate = speed } }} onPlay={() => { wantsPlayback.current = true }} onCanPlay={() => { streamFailed.current = false; setError("") }} onPause={() => { if (!audio.current?.error && !streamFailed.current) wantsPlayback.current = false; void save() }} onTimeUpdate={() => { if (!streamFailed.current && audio.current) resumeAt.current = audio.current.currentTime; if (Date.now() - lastSave.current > 5000) { lastSave.current = Date.now(); void save() } }} onEnded={next} onError={() => { streamFailed.current = true; setError("Kết nối bị gián đoạn. Sẽ tự phát tiếp khi kết nối trở lại.") }} />{streamFailed.current && <Button variant="outline" onClick={() => { wantsPlayback.current = !wantsPlayback.current; if (!wantsPlayback.current) { streamFailed.current = false; setError("Đã tạm dừng. Chọn chương để nghe tiếp.") } }}>Dừng thử lại</Button>}<select aria-label="Tốc độ nghe" className="rounded border bg-background p-2" value={speed} onChange={e => { const n = Number(e.target.value); setSpeed(n); if(audio.current) audio.current.playbackRate = n }}>{[0.75,1,1.25,1.5,2].map(n => <option key={n} value={n}>{n}×</option>)}</select></div></div></section>}
+    {active && <section className="fixed inset-x-0 bottom-0 z-40 border-t bg-background p-4"><div className="mx-auto max-w-4xl"><p className="mb-2 truncate text-sm font-medium">Chương {active.chapter.number} · {active.chapter.title}</p><div className="flex items-center gap-3"><audio key={`${active.chapter.assetId}:${loadAttempt}`} ref={audio} controls controlsList="nodownload" autoPlay preload="metadata" className="min-w-0 flex-1" src={active.chapter.url!} onLoadedMetadata={() => { if (audio.current) { audio.current.currentTime = active.position; audio.current.playbackRate = speed } }} onPlay={() => { wantsPlayback.current = true; setPreviewStopToken(value => value + 1) }} onCanPlay={() => { streamFailed.current = false; setError("") }} onPause={() => { if (!audio.current?.error && !streamFailed.current) wantsPlayback.current = false; void save() }} onTimeUpdate={() => { if (!streamFailed.current && audio.current) resumeAt.current = audio.current.currentTime; if (Date.now() - lastSave.current > 5000) { lastSave.current = Date.now(); void save() } }} onEnded={next} onError={() => { streamFailed.current = true; setError("Kết nối bị gián đoạn. Sẽ tự phát tiếp khi kết nối trở lại.") }} />{streamFailed.current && <Button variant="outline" onClick={() => { wantsPlayback.current = !wantsPlayback.current; if (!wantsPlayback.current) { streamFailed.current = false; setError("Đã tạm dừng. Chọn chương để nghe tiếp.") } }}>Dừng thử lại</Button>}<select aria-label="Tốc độ nghe" className="rounded border bg-background p-2" value={speed} onChange={e => { const n = Number(e.target.value); setSpeed(n); if(audio.current) audio.current.playbackRate = n }}>{[0.75,1,1.25,1.5,2].map(n => <option key={n} value={n}>{n}×</option>)}</select></div></div></section>}
   </main>
 }
