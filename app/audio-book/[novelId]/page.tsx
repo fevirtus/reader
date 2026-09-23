@@ -22,6 +22,7 @@ async function api(path: string, body?: unknown) {
 export default function AudioBookPage({ params }: { params: Promise<{ novelId: string }> }) {
   const { novelId } = use(params)
   const { user } = useAuth()
+  const [novelTitle, setNovelTitle] = useState("")
   const [editions, setEditions] = useState<Edition[]>([])
   const [voices, setVoices] = useState<Voice[]>([])
   const [editionId, setEditionId] = useState("")
@@ -38,7 +39,7 @@ export default function AudioBookPage({ params }: { params: Promise<{ novelId: s
   const refresh = useCallback(async () => {
     try {
       const [data, catalog] = await Promise.all([api(`novels/${encodeURIComponent(novelId)}`), api("voices")])
-      setEditions(data.editions); setVoices(catalog.voices); setError("")
+      setNovelTitle(data.title || ""); setEditions(data.editions); setVoices(catalog.voices); setError("")
     } catch (e) { setError((e as Error).message) }
     finally { setLoading(false) }
   }, [novelId])
@@ -91,7 +92,7 @@ export default function AudioBookPage({ params }: { params: Promise<{ novelId: s
   return <main className="mx-auto max-w-4xl px-4 py-8 pb-40">
     <Button variant="ghost" onClick={() => history.back()}><ArrowLeft className="mr-2 h-4 w-4" />Quay lại</Button>
     <div className="mt-6 flex items-start justify-between gap-4">
-      <div><p className="flex items-center gap-2 text-sm font-medium text-muted-foreground"><Headphones className="h-4 w-4" />Audio book</p><h1 className="mt-2 text-2xl font-bold">{selected?.title || "Nghe truyện theo cách của bạn"}</h1><p className="mt-2 text-muted-foreground">Tạo một lần, nghe bất cứ lúc nào. Các bản giọng được lưu riêng.</p></div>
+      <div><p className="flex items-center gap-2 text-sm font-medium text-muted-foreground"><Headphones className="h-4 w-4" />Audio book</p><h1 className="mt-2 text-2xl font-bold">{selected?.title || novelTitle || "Audio book"}</h1><p className="mt-2 text-muted-foreground">Tạo một lần, nghe bất cứ lúc nào. Các bản giọng được lưu riêng.</p></div>
       <Button variant="outline" size="icon" aria-label="Làm mới" onClick={() => void refresh()}><RefreshCw className="h-4 w-4" /></Button>
     </div>
     {error && <p role="alert" className="my-4 rounded-lg border border-destructive p-3 text-sm">{error}</p>}
